@@ -57,15 +57,60 @@ func (m *model) reviewable(r deck.Row) []transcript.PRLink {
 	return visiblePRs(r.Summary.PRs, m.prState)
 }
 
+type stackMsg struct {
+	id   string
+	open map[string][]gh.PR
+}
+
 func (m *model) openReview(r deck.Row) tea.Cmd {
 	prs := m.reviewable(r)
+	if len(prs) == 0 {
+		return nil
+	}
+	var repos []string
+	for _, p := range prs {
+		if !slices.Contains(repos, p.Repo) {
+			repos = append(repos, p.Repo)
+		}
+	}
+	id := r.SessionID
+	m.hint = "Finding PRs"
+	return func() tea.Msg {
+		open := map[string][]gh.PR{}
+		for _, repo := range repos {
+			if list, err := gh.Open(repo); err == nil {
+				open[repo] = list
+			}
+		}
+		return stackMsg{id: id, open: open}
+	}
+}
+
+func (m *model) gotStack(msg stackMsg) tea.Cmd {
+	if m.hint == "Finding PRs" {
+		m.hint = ""
+	}
+	i := slices.IndexFunc(m.shown(), func(r deck.Row) bool { return r.SessionID == msg.id })
+	if i < 0 {
+		return nil
+	}
+	r := m.shown()[i]
+	if m.prInfos == nil {
+		m.prInfos = map[string]gh.PR{}
+	}
+	for _, list := range msg.open {
+		for _, p := range list {
+			m.prInfos[p.URL] = p
+		}
+	}
+	prs := stackOf(m.reviewable(r), msg.open, m.prInfos)
 	switch len(prs) {
 	case 0:
 		return nil
 	case 1:
 		return m.reviewPR(r, prs, prs[0])
 	}
-	m.prPick = &prPicker{id: r.SessionID, prs: prs}
+	m.prPick = &prPicker{id: r.SessionID, prs: mergeOrder(prs, m.prInfos)}
 	var cmds []tea.Cmd
 	for _, pr := range prs {
 		if _, ok := m.prInfos[pr.URL]; ok {
@@ -88,6 +133,54 @@ func (m *model) gotPRInfo(msg prInfoMsg) {
 		m.prInfos = map[string]gh.PR{}
 	}
 	m.prInfos[msg.url] = msg.info
+	if p := m.prPick; p != nil {
+		at := p.prs[p.cursor].URL
+		p.prs = mergeOrder(p.prs, m.prInfos)
+		p.cursor = slices.IndexFunc(p.prs, func(l transcript.PRLink) bool { return l.URL == at })
+	}
+}
+
+func stackOf(seed []transcript.PRLink, open map[string][]gh.PR, infos map[string]gh.PR) []transcript.PRLink {
+	out := slices.Clone(seed)
+	linked := func(repo string, p gh.PR) bool {
+		return slices.ContainsFunc(out, func(l transcript.PRLink) bool {
+			q := infos[l.URL]
+			return l.Repo == repo && q.Head != "" && (q.Head == p.Base || q.Base == p.Head)
+		})
+	}
+	for grew := true; grew; {
+		grew = false
+		for repo, list := range open {
+			for _, p := range list {
+				if !slices.ContainsFunc(out, func(l transcript.PRLink) bool { return l.URL == p.URL }) && linked(repo, p) {
+					out = append(out, transcript.PRLink{Number: p.Number, URL: p.URL, Repo: repo})
+					grew = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+func mergeOrder(links []transcript.PRLink, infos map[string]gh.PR) []transcript.PRLink {
+	prs := make([]review.PR, len(links))
+	for i, l := range links {
+		info, ok := infos[l.URL]
+		if !ok {
+			info = gh.PR{Number: l.Number}
+		}
+		prs[i] = reviewPRFor(l, info)
+	}
+	out := make([]transcript.PRLink, 0, len(links))
+	for _, p := range review.MergeOrder(prs) {
+		out = append(out, links[slices.IndexFunc(links, func(l transcript.PRLink) bool { return l.URL == p.URL })])
+	}
+	return out
+}
+
+func currentAt(st *review.State, url string) {
+	st.PRs = review.MergeOrder(st.PRs)
+	st.Current = slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == url })
 }
 
 func (m *model) prPickKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -163,16 +256,14 @@ func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.
 	home, known := m.home, maps.Clone(m.prInfos)
 	save := func() tea.Msg {
 		_, err := review.Update(home, id, func(st *review.State) bool {
-			i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL })
-			if i < 0 {
+			if !slices.ContainsFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL }) {
 				info, ok := prInfos([]transcript.PRLink{chosen}, known)[chosen.URL]
 				if !ok {
 					return false
 				}
 				st.PRs = append(st.PRs, reviewPRFor(chosen, info))
-				i = len(st.PRs) - 1
 			}
-			st.Current = i
+			currentAt(st, chosen.URL)
 			return true
 		})
 		if err != nil {
@@ -228,11 +319,9 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 			if !ok {
 				continue
 			}
-			if p.URL == chosen.URL {
-				st.Current = len(st.PRs)
-			}
 			st.PRs = append(st.PRs, reviewPRFor(p, info))
 		}
+		currentAt(&st, chosen.URL)
 		pr, _ := st.PR()
 		src, err := review.Resolve(st.Cwd, pr)
 		if review.NeedsFetch(err) {

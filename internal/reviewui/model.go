@@ -35,7 +35,9 @@ type model struct {
 	showFixed  bool
 	path       string
 	lines      []review.Line
+	code       [][]span
 	cur, top   int
+	center     bool
 	w, h       int
 	commenting bool
 	input      textinput.Model
@@ -57,6 +59,7 @@ type loadedMsg struct {
 type diffMsg struct {
 	path  string
 	lines []review.Line
+	code  [][]span
 	err   error
 }
 
@@ -195,7 +198,7 @@ func (m *model) diff() tea.Cmd {
 	src := m.src
 	return func() tea.Msg {
 		lines, err := review.FileDiff(src, f)
-		return diffMsg{path: f.Path, lines: lines, err: err}
+		return diffMsg{path: f.Path, lines: lines, code: highlight(f.Path, lines), err: err}
 	}
 }
 
@@ -325,11 +328,11 @@ func (m *model) diffed(msg diffMsg) {
 	if msg.path == m.path && m.cur < len(m.lines) {
 		at = m.lines[m.cur]
 	}
-	m.lines = msg.lines
+	m.lines, m.code = msg.lines, msg.code
 	if msg.path != m.path {
 		m.path, m.cur, m.top = msg.path, 0, 0
 		if i := slices.IndexFunc(m.lines, func(l review.Line) bool { return l.Kind != review.Same }); i >= 0 {
-			m.cur = i
+			m.cur, m.center = i, true
 		}
 		return
 	}
@@ -396,7 +399,7 @@ func (m *model) nextChange(d int) {
 	}
 	for i := m.cur + d; i >= 0 && i < len(m.lines); i += d {
 		if start(i) {
-			m.cur = i
+			m.cur, m.center = i, true
 			return
 		}
 	}

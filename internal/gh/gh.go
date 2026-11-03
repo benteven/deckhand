@@ -55,30 +55,43 @@ func State(url string) (state, checks string, err error) {
 
 type PR struct {
 	Number int    `json:"number"`
+	URL    string `json:"url"`
 	Title  string `json:"title"`
 	Base   string `json:"baseRefName"`
 	Head   string `json:"headRefName"`
 }
 
+const prFields = "number,url,title,baseRefName,headRefName"
+
 func Info(url string) (PR, error) {
 	if !strings.HasPrefix(url, "https://") {
 		return PR{}, fmt.Errorf("not a PR url: %q", url)
 	}
+	var v PR
+	err := ghJSON(&v, "pr", "view", url, "--json", prFields)
+	return v, err
+}
+
+func Open(repo string) ([]PR, error) {
+	var v []PR
+	err := ghJSON(&v, "pr", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", prFields)
+	return v, err
+}
+
+func ghJSON(v any, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", url, "--json", "number,title,baseRefName,headRefName")
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.WaitDelay = 3 * time.Second
 	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-		return PR{}, errors.New(strings.TrimSpace(string(exit.Stderr)))
+		return errors.New(strings.TrimSpace(string(exit.Stderr)))
 	}
 	if err != nil {
-		return PR{}, err
+		return err
 	}
-	var v PR
-	err = json.Unmarshal(out, &v)
-	return v, err
+	return json.Unmarshal(out, v)
 }
 
 func rollup(checks []check) string {

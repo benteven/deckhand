@@ -38,3 +38,15 @@ func TestArrange(t *testing.T) {
 	assert.Equal(t, "core", got[0].Note)
 	assert.Equal(t, Tests, got[5].Group)
 }
+
+func TestMergeOrder(t *testing.T) {
+	pr := func(n int, base, head string) PR {
+		return PR{Number: n, URL: head, Repo: "o/r", Base: base, Head: head}
+	}
+	got := MergeOrder([]PR{pr(3, "b", "c"), pr(9, "main", "x"), pr(5, "main", "b"), pr(4, "c", "d")})
+	var nums []int
+	for _, p := range got {
+		nums = append(nums, p.Number)
+	}
+	assert.Equal(t, []int{5, 3, 4, 9}, nums)
+}

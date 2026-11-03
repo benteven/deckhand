@@ -1,11 +1,13 @@
 package review
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 )
 
@@ -136,4 +138,37 @@ func LoadNotes(path string) ([]Note, error) {
 		return nil, err
 	}
 	return v.Files, nil
+}
+
+func MergeOrder(prs []PR) []PR {
+	sorted := slices.SortedFunc(slices.Values(prs), func(a, b PR) int { return cmp.Compare(a.Number, b.Number) })
+	parent := func(p PR) int {
+		return slices.IndexFunc(sorted, func(q PR) bool {
+			return q.URL != p.URL && q.Repo == p.Repo && q.Head != "" && q.Head == p.Base
+		})
+	}
+	out := make([]PR, 0, len(sorted))
+	done := make([]bool, len(sorted))
+	var add func(i int)
+	add = func(i int) {
+		if done[i] {
+			return
+		}
+		done[i] = true
+		out = append(out, sorted[i])
+		for j, q := range sorted {
+			if parent(q) == i {
+				add(j)
+			}
+		}
+	}
+	for i, p := range sorted {
+		if parent(p) < 0 {
+			add(i)
+		}
+	}
+	for i := range sorted {
+		add(i)
+	}
+	return out
 }

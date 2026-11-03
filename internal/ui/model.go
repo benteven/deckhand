@@ -443,6 +443,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 	case reviewFailedMsg:
 		m.reviewFailed(msg)
+	case stackMsg:
+		return m, m.gotStack(msg)
 	case prInfoMsg:
 		m.gotPRInfo(msg)
 	case stopFailedMsg:

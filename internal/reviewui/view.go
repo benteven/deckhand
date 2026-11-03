@@ -2,6 +2,8 @@ package reviewui
 
 import (
 	"fmt"
+	"image/color"
+	"math"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,8 +25,15 @@ var (
 	blue   = style.Blue
 	purple = style.Purple
 	rule   = style.Rule
-	cursor = lipgloss.NewStyle().Background(lipgloss.Color("#2a2f3a"))
+	addBg  = lipgloss.Color("#1d3324")
+	delBg  = lipgloss.Color("#3b2024")
 )
+
+var cursorBg = map[review.LineKind]color.Color{
+	review.Same: lipgloss.Color("#2a2f3a"),
+	review.Add:  lipgloss.Color("#2a4a35"),
+	review.Del:  lipgloss.Color("#552a30"),
+}
 
 const hint = "j/k move  n/N change  ]/[ file  J/K PR  c comment  t tests  tab claude"
 
@@ -159,33 +168,160 @@ func (m *model) diffView(w, h int) []string {
 		}
 	}
 	room := max(h-len(out), 1)
+	rows := func(i int) int { return rowCount(m.lines[i], m.codeAt(i), w) }
+	if m.center {
+		m.center = false
+		m.centerBlock(room, rows)
+	}
 	if m.cur < m.top {
 		m.top = m.cur
 	}
-	if m.cur >= m.top+room {
-		m.top = m.cur - room + 1
+	used := 0
+	for i := m.top; i <= m.cur && i < len(m.lines); i++ {
+		used += rows(i)
 	}
-	for i := m.top; i < len(m.lines) && i < m.top+room; i++ {
-		out = append(out, codeLine(m.lines[i], i == m.cur, w))
+	for m.top < m.cur && used > room {
+		used -= rows(m.top)
+		m.top++
+	}
+	for i := m.top; i < len(m.lines) && len(out) < h; i++ {
+		for _, r := range codeRows(m.lines[i], m.codeAt(i), i == m.cur, w) {
+			if len(out) < h {
+				out = append(out, r)
+			}
+		}
 	}
 	return out
 }
 
-func codeLine(l review.Line, atCursor bool, w int) string {
-	num, mark, look := l.New, " ", white
+func (m *model) centerBlock(room int, rows func(int) int) {
+	end := m.cur
+	for end+1 < len(m.lines) && m.lines[end+1].Kind != review.Same {
+		end++
+	}
+	block := 0
+	for i := m.cur; i <= end; i++ {
+		block += rows(i)
+	}
+	above := max(room-block, 0) / 2
+	m.top = m.cur
+	for m.top > 0 && rows(m.top-1) <= above {
+		above -= rows(m.top - 1)
+		m.top--
+	}
+	filled := 0
+	for i := m.top; i < len(m.lines) && filled < room; i++ {
+		filled += rows(i)
+	}
+	for m.top > 0 && filled+rows(m.top-1) <= room {
+		filled += rows(m.top - 1)
+		m.top--
+	}
+}
+
+func (m *model) codeAt(i int) []span {
+	if len(m.code) == len(m.lines) {
+		return m.code[i]
+	}
+	return plain(m.lines[i])
+}
+
+func gutter(l review.Line) (string, lipgloss.Style, color.Color) {
+	num, mark, look, bg := l.New, " ", gray, color.Color(nil)
 	switch l.Kind {
 	case review.Add:
-		mark, look = "+", green
+		mark, look, bg = "+", green, addBg
 	case review.Del:
-		num, mark, look = l.Old, "-", red
+		num, mark, look, bg = l.Old, "-", red, delBg
 	}
 	n := "    "
 	if num > 0 {
 		n = fmt.Sprintf("%4d", num)
 	}
-	text := ansi.Truncate(n+" "+mark+" "+textclean.Clean(l.Text), w-1, "…")
-	if atCursor {
-		return orange.Render("▌") + cursor.Inherit(look).Render(text+strings.Repeat(" ", max(w-1-ansi.StringWidth(text), 0)))
+	return n + " " + mark + " ", look, bg
+}
+
+func breaks(code []span, width int) []int {
+	var pos []int
+	var space []bool
+	at := 0
+	for _, s := range code {
+		for _, r := range s.text {
+			pos = append(pos, at)
+			space = append(space, r == ' ')
+			at += ansi.StringWidth(string(r))
+		}
 	}
-	return " " + look.Render(text)
+	pos = append(pos, at)
+	starts := []int{0}
+	row, gap := 0, -1
+	for i := range space {
+		for pos[i+1]-pos[row] > width && i > row {
+			cut := i
+			if gap > row {
+				cut = gap
+			}
+			starts = append(starts, pos[cut])
+			row, gap = cut, -1
+		}
+		if space[i] {
+			gap = i + 1
+		}
+	}
+	return starts
+}
+
+func rowCount(l review.Line, code []span, w int) int {
+	head, _, _ := gutter(l)
+	return len(breaks(code, max(w-1-ansi.StringWidth(head), 1)))
+}
+
+func codeRows(l review.Line, code []span, atCursor bool, w int) []string {
+	head, look, bg := gutter(l)
+	bar := " "
+	if atCursor {
+		bar = orange.Render("▌")
+		bg = cursorBg[l.Kind]
+	}
+	width := max(w-1-ansi.StringWidth(head), 1)
+	blank := strings.Repeat(" ", ansi.StringWidth(head))
+	starts := breaks(code, width)
+	out := make([]string, 0, len(starts))
+	for r, lo := range starts {
+		hi := math.MaxInt
+		if r+1 < len(starts) {
+			hi = starts[r+1]
+		}
+		g := blank
+		if r == 0 {
+			g = head
+		}
+		var b strings.Builder
+		b.WriteString(bar)
+		b.WriteString(paint(look.GetForeground(), bg).Render(g))
+		at, used := 0, 0
+		for _, s := range code {
+			sw := ansi.StringWidth(s.text)
+			if a, z := max(lo, at), min(hi, at+sw); a < z {
+				part := ansi.Cut(s.text, a-at, z-at)
+				used += ansi.StringWidth(part)
+				b.WriteString(paint(s.fg, bg).Render(part))
+			}
+			at += sw
+		}
+		b.WriteString(paint(nil, bg).Render(strings.Repeat(" ", max(width-used, 0))))
+		out = append(out, b.String())
+	}
+	return out
+}
+
+func paint(fg, bg color.Color) lipgloss.Style {
+	st := lipgloss.NewStyle().Foreground(white.GetForeground())
+	if fg != nil {
+		st = st.Foreground(fg)
+	}
+	if bg != nil {
+		st = st.Background(bg)
+	}
+	return st
 }
