@@ -251,13 +251,15 @@ type model struct {
 	arts     *artifactList
 	prPick   *prPicker
 	reviews  map[string]review.State
-	takeover *takeoverDialog
-	quit     *quitDialog
-	del      *deleteDialog
-	restart  *restartDialog
-	handoff  *handoffDialog
-	help     *helpScreen
-	accounts *accountDialog
+
+	startingReview map[string]bool
+	takeover       *takeoverDialog
+	quit           *quitDialog
+	del            *deleteDialog
+	restart        *restartDialog
+	handoff        *handoffDialog
+	help           *helpScreen
+	accounts       *accountDialog
 
 	switches      map[string]bool
 	continueAfter map[string]bool
@@ -438,6 +440,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case errMsg:
 		m.err = msg.err
+	case reviewFailedMsg:
+		m.reviewFailed(msg)
 	case prTitleMsg:
 		if m.prPick != nil {
 			m.prPick.titles[msg.url] = msg.title
@@ -983,10 +987,7 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		return m.zoom(false)
 	}
 	if msg.rev != nil {
-		if m.reviews == nil {
-			m.reviews = map[string]review.State{}
-		}
-		m.reviews[msg.id] = *msg.rev
+		m.reviewStarted(msg.id, *msg.rev)
 	}
 	m.setMode(modeActive)
 	entry := store.ActiveEntry{SessionID: msg.id, Cwd: msg.cwd, Name: msg.name, LastInteraction: time.Now()}
@@ -1141,12 +1142,7 @@ func (m *model) refresh() tea.Cmd {
 			msg.agents = runningAgents(ids, msg.events, msg.live, msg.files)
 		}
 		msg.accounts = accounts.List(home, claudeHome)
-		msg.reviews = map[string]review.State{}
-		for _, id := range ids {
-			if st, ok, err := review.Load(home, id); err == nil && ok {
-				msg.reviews[id] = st
-			}
-		}
+		msg.reviews = review.LoadAll(home)
 		if save {
 			reader.Save()
 		}
@@ -1534,7 +1530,7 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 		var extra []string
 		var rev *review.State
 		if isReview {
-			extra, rev = []string{"--add-dir", review.Dir(home, r.SessionID)}, &st
+			extra, rev = []string{"--add-dir=" + review.Dir(home, r.SessionID)}, &st
 		}
 		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "", extra...)
 		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}

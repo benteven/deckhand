@@ -105,43 +105,69 @@ func (m *model) prPickLines(w int) []string {
 }
 
 func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.PRLink) tea.Cmd {
+	if m.startingReview[r.SessionID] {
+		m.hint = "Review is starting"
+		return nil
+	}
 	id, st, ok := m.reviewOf(r.SessionID)
 	if !ok {
 		return m.startReview(r, prs, chosen)
 	}
-	if i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL }); i >= 0 {
-		st.Current = i
-		m.reviews[id] = st
-	}
-	m.selectRow(id)
 	home := m.home
 	save := func() tea.Msg {
+		i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL })
+		if i < 0 {
+			n, title, base, head, err := gh.Info(chosen.URL)
+			if err != nil {
+				return errMsg{fmt.Errorf("PR #%d: %w", chosen.Number, err)}
+			}
+			st.PRs = append(st.PRs, review.PR{Number: n, URL: chosen.URL, Repo: chosen.Repo, Title: title, Base: base, Head: head})
+			i = len(st.PRs) - 1
+		}
+		st.Current = i
 		if err := st.Save(home, id); err != nil {
 			return errMsg{err}
 		}
 		return nil
 	}
-	return tea.Sequence(save, m.enter())
+	return tea.Sequence(save, m.openRow(id))
+}
+
+func (m *model) openRow(id string) tea.Cmd {
+	if slices.ContainsFunc(m.active, func(r deck.Row) bool { return r.SessionID == id }) {
+		m.selectRow(id)
+		return m.enter()
+	}
+	if !slices.ContainsFunc(m.suspended, func(r deck.Row) bool { return r.SessionID == id }) {
+		return nil
+	}
+	m.setMode(modeSuspended)
+	m.selected = id
+	m.syncCursor()
+	return m.enter()
+}
+
+type reviewFailedMsg struct {
+	source string
+	err    error
 }
 
 func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcript.PRLink) tea.Cmd {
 	id := uuid.NewV4().String()
-	account := m.state.AccountFor(r.SessionID)
-	if account != m.state.Account {
-		if m.state.Accounts == nil {
-			m.state.Accounts = map[string]string{}
-		}
-		m.state.Accounts[id] = account
-	}
-	account = m.launchAccount(id, account)
+	account := m.launchAccount(id, m.state.AccountFor(r.SessionID))
 	ops, home := m.ops, m.home
+	if m.startingReview == nil {
+		m.startingReview = map[string]bool{}
+	}
+	m.startingReview[r.SessionID] = true
 	m.hint = "Starting review"
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg { return reviewFailedMsg{source: r.SessionID, err: err} }
 		st := review.State{Source: r.SessionID, Cwd: r.Cwd}
 		for _, p := range prs {
 			n, title, base, head, err := gh.Info(p.URL)
 			if err != nil {
-				return errMsg{fmt.Errorf("PR #%d: %w", p.Number, err)}
+				return fail(fmt.Errorf("PR #%d: %w", p.Number, err))
 			}
 			if p.URL == chosen.URL {
 				st.Current = len(st.PRs)
@@ -149,18 +175,45 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 			st.PRs = append(st.PRs, review.PR{Number: n, URL: p.URL, Repo: p.Repo, Title: title, Base: base, Head: head})
 		}
 		pr, _ := st.PR()
+		if _, err := review.Resolve(st.Cwd, pr); err != nil {
+			return fail(err)
+		}
 		review.Fetch(st.Cwd, pr)
 		src, err := review.Resolve(st.Cwd, pr)
 		if err != nil {
-			return errMsg{err}
+			return fail(err)
 		}
 		st.Asked = []int{pr.Number}
 		if err := st.Save(home, id); err != nil {
-			return errMsg{err}
+			return fail(err)
 		}
 		prompt := review.NotesPrompt(pr, src, review.NotesPath(home, id, pr.Number))
-		pane, err := ops.Start(st.Cwd, id, "", false, account, prompt, "--add-dir", review.Dir(home, id))
-		return startedMsg{id: id, cwd: st.Cwd, pane: pane, err: err, rev: &st}
+		pane, err := ops.Start(st.Cwd, id, "", false, account, prompt, "--add-dir="+review.Dir(home, id))
+		if err != nil {
+			return fail(err)
+		}
+		return startedMsg{id: id, cwd: st.Cwd, pane: pane, rev: &st}
+	}
+}
+
+func (m *model) reviewFailed(msg reviewFailedMsg) {
+	delete(m.startingReview, msg.source)
+	m.hint = ""
+	m.err = msg.err
+}
+
+func (m *model) reviewStarted(id string, st review.State) {
+	delete(m.startingReview, st.Source)
+	m.hint = ""
+	if m.reviews == nil {
+		m.reviews = map[string]review.State{}
+	}
+	m.reviews[id] = st
+	if account := m.state.AccountFor(st.Source); account != m.state.Account {
+		if m.state.Accounts == nil {
+			m.state.Accounts = map[string]string{}
+		}
+		m.state.Accounts[id] = account
 	}
 }
 

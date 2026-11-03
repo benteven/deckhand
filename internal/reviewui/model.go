@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -44,6 +45,7 @@ type loadedMsg struct {
 	src   review.Source
 	files []review.File
 	fp    string
+	ask   string
 	err   error
 }
 
@@ -59,9 +61,10 @@ type fpMsg string
 
 type fetchedMsg struct{}
 
-type askMsg string
-
-type retryMsg string
+type retryMsg struct {
+	text    string
+	comment bool
+}
 
 func Run(id string) error {
 	home := paths.DeckHome()
@@ -118,15 +121,36 @@ func (m *model) load() tea.Cmd {
 		if err != nil {
 			return loadedMsg{st: st, pr: pr, src: src, err: err}
 		}
-		notes, _ := review.LoadNotes(review.NotesPath(home, id, pr.Number))
-		return loadedMsg{st: st, pr: pr, src: src, files: review.Arrange(files, notes), fp: fingerprint(home, id, st, pr)}
+		path := review.NotesPath(home, id, pr.Number)
+		notes, _ := review.LoadNotes(path)
+		ask := ""
+		if _, err := os.Stat(path); err != nil && !slices.Contains(st.Asked, pr.Number) {
+			st.Asked = append(st.Asked, pr.Number)
+			if st.Save(home, id) == nil {
+				ask = review.NotesPrompt(pr, src, path)
+			}
+		}
+		return loadedMsg{st: st, pr: pr, src: src, files: review.Arrange(files, notes), fp: fingerprint(home, id, src.Cwd, pr), ask: ask}
 	}
 }
 
-func fingerprint(home, id string, st review.State, pr review.PR) string {
-	status, _ := exec.Command("git", "-C", st.Cwd, "status", "--porcelain", "-z").Output()
-	head, _ := exec.Command("git", "-C", st.Cwd, "rev-parse", "HEAD").Output()
-	return fmt.Sprintf("%s|%s|%s|%s", status, head, mtime(filepath.Join(review.Dir(home, id), "review.json")), mtime(review.NotesPath(home, id, pr.Number)))
+func fingerprint(home, id, dir string, pr review.PR) string {
+	status, _ := exec.Command("git", "--no-optional-locks", "-C", dir, "status", "--porcelain", "-z").Output()
+	head, _ := exec.Command("git", "--no-optional-locks", "-C", dir, "rev-parse", "HEAD").Output()
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s|%s|%s|%s", status, head, mtime(filepath.Join(review.Dir(home, id), "review.json")), mtime(review.NotesPath(home, id, pr.Number)))
+	fields := strings.Split(string(status), "\x00")
+	for i := 0; i < len(fields); i++ {
+		f := fields[i]
+		if len(f) < 4 {
+			continue
+		}
+		b.WriteString("|" + mtime(filepath.Join(dir, f[3:])))
+		if f[0] == 'R' || f[0] == 'C' {
+			i++
+		}
+	}
+	return b.String()
 }
 
 func mtime(path string) string {
@@ -134,15 +158,18 @@ func mtime(path string) string {
 	if err != nil {
 		return ""
 	}
-	return info.ModTime().String()
+	return fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 }
 
 func (m *model) checkFP() tea.Cmd {
-	home, id := m.home, m.id
+	home, id, dir := m.home, m.id, m.src.Cwd
 	return func() tea.Msg {
 		st, _, _ := review.Load(home, id)
 		pr, _ := st.PR()
-		return fpMsg(fingerprint(home, id, st, pr))
+		if dir == "" {
+			dir = st.Cwd
+		}
+		return fpMsg(fingerprint(home, id, dir, pr))
 	}
 }
 
@@ -179,7 +206,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.input.SetWidth(max(m.w-12, 1))
-		return m, tea.ClearScreen
+		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return tea.ClearScreen() })
 	case tickMsg:
 		return m, tea.Batch(m.checkFP(), tick())
 	case fpMsg:
@@ -192,10 +219,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loaded(msg)
 	case diffMsg:
 		m.diffed(msg)
-	case askMsg:
-		return m, tea.Batch(m.send(string(msg)), m.load())
 	case retryMsg:
-		return m, m.send(string(msg))
+		if msg.comment && msg.text != m.pending {
+			return m, nil
+		}
+		return m, m.send(msg.text, msg.comment)
 	case sentMsg:
 		return m, m.sent(msg)
 	case tea.KeyPressMsg:
@@ -209,6 +237,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) loaded(msg loadedMsg) tea.Cmd {
 	m.st, m.pr, m.src, m.err, m.fp = msg.st, msg.pr, msg.src, msg.err, msg.fp
+	var ask tea.Cmd
+	if msg.ask != "" {
+		ask = m.send(msg.ask, false)
+	}
 	keep := ""
 	if f, ok := m.selected(); ok {
 		keep = f.Path
@@ -218,7 +250,7 @@ func (m *model) loaded(msg loadedMsg) tea.Cmd {
 	if m.sel < 0 {
 		m.sel = m.firstVisible()
 	}
-	return m.diff()
+	return tea.Batch(ask, m.diff())
 }
 
 func (m *model) diffed(msg diffMsg) {
@@ -327,33 +359,29 @@ func (m *model) movePR(d int) tea.Cmd {
 		}
 		pr, _ := st.PR()
 		review.Fetch(st.Cwd, pr)
-		src, err := review.Resolve(st.Cwd, pr)
-		notes := review.NotesPath(home, id, pr.Number)
-		if _, serr := os.Stat(notes); err == nil && serr != nil && !slices.Contains(st.Asked, pr.Number) {
-			st.Asked = append(st.Asked, pr.Number)
-			st.Save(home, id)
-			return askMsg(review.NotesPrompt(pr, src, notes))
-		}
 		return fetchedMsg{}
 	}
 }
 
 func (m *model) commentKey(msg tea.KeyPressMsg) tea.Cmd {
-	m.status, m.statusErr = "", false
+	if m.pending == "" {
+		m.status, m.statusErr = "", false
+	}
 	switch msg.String() {
 	case "esc":
-		m.commenting = false
+		m.commenting, m.pending = false, ""
+		m.status, m.statusErr = "", false
 		m.input.SetValue("")
 		m.input.Blur()
 		return nil
 	case "enter":
 		text := m.input.Value()
-		if text == "" || m.cur >= len(m.lines) {
+		if text == "" || m.cur >= len(m.lines) || m.pending != "" {
 			return nil
 		}
 		f, _ := m.selected()
 		m.pending = review.CommentPrompt(m.pr, m.src, f.Path, m.lines[m.cur], text)
-		return m.send(m.pending)
+		return m.send(m.pending, true)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)

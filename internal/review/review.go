@@ -79,6 +79,17 @@ func (s State) Save(home, id string) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, "review.json"))
 }
 
+func LoadAll(home string) map[string]State {
+	out := map[string]State{}
+	entries, _ := os.ReadDir(filepath.Join(home, "reviews"))
+	for _, e := range entries {
+		if st, ok, err := Load(home, e.Name()); err == nil && ok {
+			out[e.Name()] = st
+		}
+	}
+	return out
+}
+
 type Note struct {
 	Path  string `json:"path"`
 	Group string `json:"group"`

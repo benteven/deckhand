@@ -2,12 +2,14 @@ package review
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Source struct {
@@ -35,8 +37,12 @@ func git(cwd string, args ...string) (string, error) {
 }
 
 func Fetch(cwd string, pr PR) error {
-	_, err := git(cwd, "fetch", "-q", "origin", pr.Base, pr.Head)
-	return err
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "fetch", "-q", "origin", pr.Base, pr.Head)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	cmd.WaitDelay = 3 * time.Second
+	return cmd.Run()
 }
 
 func ref(cwd, name string, local bool) string {
@@ -53,9 +59,11 @@ func ref(cwd, name string, local bool) string {
 
 func Resolve(cwd string, pr PR) (Source, error) {
 	notCheckout := fmt.Errorf("folder is not a checkout of %s", pr.Repo)
-	if _, err := git(cwd, "rev-parse", "--show-toplevel"); err != nil {
+	top, err := git(cwd, "rev-parse", "--show-toplevel")
+	if err != nil || top == "" {
 		return Source{}, notCheckout
 	}
+	cwd = top
 	if url, err := git(cwd, "remote", "get-url", "origin"); err == nil && !strings.Contains(strings.ToLower(url), strings.ToLower(pr.Repo)) {
 		return Source{}, notCheckout
 	}
