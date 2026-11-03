@@ -94,7 +94,7 @@ In the list:
 | `g` | Agent mode: `j`/`k` also step through subagents and show the live subagent transcript; Enter opens the parent session |
 | `t` | Take over a session running in another terminal; on your own session, move it to the next account |
 | `o` | Open the row's pull requests |
-| `v` | Review the row's pull requests in deckhand. In the review: `j`/`k` move, `n` next change, `]`/`[` file, `J`/`K` PR, `t` tests and generated files, `c` comment to Claude |
+| `v` | Review the row's pull requests in deckhand. In the review: `j`/`k` move, `n`/`N` change, `]`/`[` file, `J`/`K` PR, `t` tests and generated files, `c` comment to Claude, `tab` go to Claude |
 | `a` | List the row's artifacts; Enter opens one |
 | `d` | Move a suspended session to the Trash |
 | `q` | Close the app; sessions keep running |

@@ -25,6 +25,11 @@ type model struct {
 	src        review.Source
 	err        error
 	fp         string
+	ready      bool
+	loading    bool
+	dirty      bool
+	want       string
+	asked      map[int]bool
 	files      []review.File
 	sel        int
 	showFixed  bool
@@ -40,13 +45,13 @@ type model struct {
 }
 
 type loadedMsg struct {
-	st    review.State
-	pr    review.PR
-	src   review.Source
-	files []review.File
-	fp    string
-	ask   string
-	err   error
+	st           review.State
+	pr           review.PR
+	src          review.Source
+	files        []review.File
+	fp           string
+	notesMissing bool
+	err          error
 }
 
 type diffMsg struct {
@@ -59,11 +64,13 @@ type tickMsg struct{}
 
 type fpMsg string
 
-type fetchedMsg struct{}
+type fetchedMsg struct{ err error }
 
-type retryMsg struct {
-	text    string
-	comment bool
+type reloadMsg struct{}
+
+type statusMsg struct {
+	text string
+	err  bool
 }
 
 func Run(id string) error {
@@ -75,13 +82,14 @@ func Run(id string) error {
 		home:  home,
 		t:     tmux.Client{Socket: paths.Socket(), Conf: filepath.Join(home, "tmux.conf")},
 		input: input,
+		asked: map[int]bool{},
 	}
 	_, err := tea.NewProgram(m).Run()
 	return err
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.fetch(), tick())
+	return tea.Batch(m.requestLoad(), m.fetch(), tick())
 }
 
 func tick() tea.Cmd {
@@ -92,11 +100,21 @@ func (m *model) fetch() tea.Cmd {
 	home, id := m.home, m.id
 	return func() tea.Msg {
 		st, ok, err := review.Load(home, id)
-		if pr, has := st.PR(); err == nil && ok && has {
-			review.Fetch(st.Cwd, pr)
+		pr, has := st.PR()
+		if err != nil || !ok || !has {
+			return fetchedMsg{}
 		}
-		return fetchedMsg{}
+		return fetchedMsg{err: review.Fetch(st.Cwd, pr)}
 	}
+}
+
+func (m *model) requestLoad() tea.Cmd {
+	if m.loading {
+		m.dirty = true
+		return nil
+	}
+	m.loading = true
+	return m.load()
 }
 
 func (m *model) load() tea.Cmd {
@@ -117,20 +135,15 @@ func (m *model) load() tea.Cmd {
 		if err != nil {
 			return loadedMsg{st: st, pr: pr, err: err}
 		}
+		fp := fingerprint(home, id, src.Cwd, pr)
 		files, err := review.Changed(src)
 		if err != nil {
 			return loadedMsg{st: st, pr: pr, src: src, err: err}
 		}
 		path := review.NotesPath(home, id, pr.Number)
 		notes, _ := review.LoadNotes(path)
-		ask := ""
-		if _, err := os.Stat(path); err != nil && !slices.Contains(st.Asked, pr.Number) {
-			st.Asked = append(st.Asked, pr.Number)
-			if st.Save(home, id) == nil {
-				ask = review.NotesPrompt(pr, src, path)
-			}
-		}
-		return loadedMsg{st: st, pr: pr, src: src, files: review.Arrange(files, notes), fp: fingerprint(home, id, src.Cwd, pr), ask: ask}
+		_, statErr := os.Stat(path)
+		return loadedMsg{st: st, pr: pr, src: src, files: review.Arrange(files, notes), fp: fp, notesMissing: statErr != nil}
 	}
 }
 
@@ -208,38 +221,66 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetWidth(max(m.w-12, 1))
 		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return tea.ClearScreen() })
 	case tickMsg:
+		if m.loading {
+			return m, tick()
+		}
 		return m, tea.Batch(m.checkFP(), tick())
 	case fpMsg:
 		if string(msg) != m.fp {
-			return m, m.load()
+			return m, m.requestLoad()
 		}
 	case fetchedMsg:
-		return m, m.load()
+		if msg.err != nil {
+			m.status, m.statusErr = "fetch failed, the diff may be old: "+msg.err.Error(), true
+		}
+		return m, m.requestLoad()
+	case reloadMsg:
+		return m, m.requestLoad()
 	case loadedMsg:
 		return m, m.loaded(msg)
 	case diffMsg:
 		m.diffed(msg)
 	case retryMsg:
-		if msg.comment && msg.text != m.pending {
+		if msg.out.comment && msg.out.text != m.pending {
 			return m, nil
 		}
-		return m, m.send(msg.text, msg.comment)
+		return m, m.send(msg.out)
 	case sentMsg:
 		return m, m.sent(msg)
+	case statusMsg:
+		m.status, m.statusErr = msg.text, msg.err
 	case tea.KeyPressMsg:
 		if m.commenting {
 			return m, m.commentKey(msg)
 		}
 		return m, m.key(msg)
+	default:
+		if m.commenting && m.pending == "" {
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		}
 	}
 	return m, nil
 }
 
 func (m *model) loaded(msg loadedMsg) tea.Cmd {
+	m.loading = false
+	var again tea.Cmd
+	if m.dirty {
+		m.dirty = false
+		again = m.requestLoad()
+	}
+	if m.want != "" && msg.pr.URL != m.want {
+		return again
+	}
+	m.want = ""
+	m.ready = true
 	m.st, m.pr, m.src, m.err, m.fp = msg.st, msg.pr, msg.src, msg.err, msg.fp
 	var ask tea.Cmd
-	if msg.ask != "" {
-		ask = m.send(msg.ask, false)
+	if msg.err == nil && msg.notesMissing && !slices.Contains(m.st.Asked, m.pr.Number) && !m.asked[m.pr.Number] {
+		m.asked[m.pr.Number] = true
+		ask = m.send(outbound{text: review.NotesPrompt(m.pr, m.src, review.NotesPath(m.home, m.id, m.pr.Number)), notes: m.pr.Number})
 	}
 	keep := ""
 	if f, ok := m.selected(); ok {
@@ -250,7 +291,24 @@ func (m *model) loaded(msg loadedMsg) tea.Cmd {
 	if m.sel < 0 {
 		m.sel = m.firstVisible()
 	}
-	return tea.Batch(ask, m.diff())
+	return tea.Batch(again, ask, m.diff())
+}
+
+func (m *model) markAsked(pr int) tea.Cmd {
+	home, id := m.home, m.id
+	return func() tea.Msg {
+		_, err := review.Update(home, id, func(s *review.State) bool {
+			if slices.Contains(s.Asked, pr) {
+				return false
+			}
+			s.Asked = append(s.Asked, pr)
+			return true
+		})
+		if err != nil {
+			return statusMsg{text: err.Error(), err: true}
+		}
+		return nil
+	}
 }
 
 func (m *model) diffed(msg diffMsg) {
@@ -310,8 +368,16 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			m.sel = m.firstVisible()
 			return m.diff()
 		}
+	case "tab":
+		return m.focusClaude("")
+	case "ctrl+j":
+		return m.focusClaude("C-j")
+	case "ctrl+k":
+		return m.focusClaude("C-k")
+	case "ctrl+q":
+		return m.focusClaude("C-q")
 	case "c":
-		if len(m.lines) == 0 || m.err != nil {
+		if len(m.lines) == 0 || m.err != nil || m.path == "" {
 			return nil
 		}
 		m.commenting = true
@@ -352,19 +418,25 @@ func (m *model) movePR(d int) tea.Cmd {
 		return nil
 	}
 	m.st.Current = next
-	st, home, id := m.st, m.home, m.id
-	return func() tea.Msg {
-		if fresh, ok, err := review.Load(home, id); err == nil && ok && next < len(fresh.PRs) {
-			fresh.Current = next
-			st = fresh
+	m.pr = m.st.PRs[next]
+	m.want = m.pr.URL
+	m.files, m.lines, m.path, m.sel = nil, nil, "", -1
+	home, id, want := m.home, m.id, m.want
+	save := func() tea.Msg {
+		_, err := review.Update(home, id, func(s *review.State) bool {
+			i := slices.IndexFunc(s.PRs, func(p review.PR) bool { return p.URL == want })
+			if i < 0 || s.Current == i {
+				return false
+			}
+			s.Current = i
+			return true
+		})
+		if err != nil {
+			return statusMsg{text: err.Error(), err: true}
 		}
-		if err := st.Save(home, id); err != nil {
-			return loadedMsg{st: st, err: err}
-		}
-		pr, _ := st.PR()
-		review.Fetch(st.Cwd, pr)
-		return fetchedMsg{}
+		return reloadMsg{}
 	}
+	return tea.Sequence(save, m.fetch())
 }
 
 func (m *model) commentKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -385,7 +457,10 @@ func (m *model) commentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.pending = review.CommentPrompt(m.pr, m.src, m.path, m.lines[m.cur], text)
-		return m.send(m.pending, true)
+		return m.send(outbound{text: m.pending, comment: true})
+	}
+	if m.pending != "" {
+		return nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)

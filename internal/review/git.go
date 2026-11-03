@@ -3,6 +3,7 @@ package review
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,18 +32,42 @@ type Line struct {
 	Text     string
 }
 
+func run(cwd string, timeout time.Duration, env []string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", cwd}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.WaitDelay = 3 * time.Second
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		err = fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(string(exit.Stderr)))
+	}
+	return out, err
+}
+
+func gitOut(cwd string, args ...string) ([]byte, error) {
+	return run(cwd, 30*time.Second, nil, args...)
+}
+
 func git(cwd string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", cwd}, args...)...).Output()
+	out, err := gitOut(cwd, args...)
 	return strings.TrimSpace(string(out)), err
 }
 
 func Fetch(cwd string, pr PR) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "fetch", "-q", "origin", pr.Base, pr.Head)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
-	cmd.WaitDelay = 3 * time.Second
-	return cmd.Run()
+	env := []string{"GIT_TERMINAL_PROMPT=0"}
+	if ssh, _ := git(cwd, "config", "core.sshCommand"); ssh == "" && os.Getenv("GIT_SSH_COMMAND") == "" && os.Getenv("GIT_SSH") == "" {
+		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	_, err := run(cwd, 20*time.Second, env, "fetch", "-q", "--end-of-options", "origin", pr.Base, pr.Head)
+	return err
+}
+
+var errNoBase = errors.New("no common commit")
+
+func NeedsFetch(err error) bool {
+	return errors.Is(err, errNoBase)
 }
 
 func ref(cwd, name string, local bool) string {
@@ -69,9 +94,9 @@ func Resolve(cwd string, pr PR) (Source, error) {
 	}
 	head := ref(cwd, pr.Head, true)
 	base := ref(cwd, pr.Base, false)
-	mb, err := git(cwd, "merge-base", base, head)
+	mb, err := git(cwd, "merge-base", "--end-of-options", base, head)
 	if err != nil {
-		return Source{}, fmt.Errorf("no common commit for %s and %s", base, head)
+		return Source{}, fmt.Errorf("%w for %s and %s", errNoBase, base, head)
 	}
 	branch, _ := git(cwd, "branch", "--show-current")
 	return Source{Cwd: cwd, MergeBase: mb, Head: head, CheckedOut: branch == pr.Head}, nil
@@ -92,7 +117,7 @@ func (s Source) diffArgs(args ...string) []string {
 }
 
 func Changed(src Source) ([]File, error) {
-	out, err := exec.Command("git", append([]string{"-C", src.Cwd}, src.diffArgs("diff", "--numstat", "-z", "-M")...)...).Output()
+	out, err := gitOut(src.Cwd, src.diffArgs("diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "-M")...)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +163,11 @@ func generatedAttrs(cwd string, files []File) map[string]bool {
 	if len(files) == 0 {
 		return nil
 	}
-	args := []string{"-C", cwd, "check-attr", "-z", "linguist-generated", "--"}
+	args := []string{"check-attr", "-z", "linguist-generated", "--"}
 	for _, f := range files {
 		args = append(args, f.Path)
 	}
-	out, err := exec.Command("git", args...).Output()
+	out, err := gitOut(cwd, args...)
 	if err != nil {
 		return nil
 	}
@@ -161,7 +186,7 @@ func head(src Source, p string) []byte {
 	if src.CheckedOut {
 		data, _ = os.ReadFile(filepath.Join(src.Cwd, p))
 	} else {
-		data, _ = exec.Command("git", "-C", src.Cwd, "show", src.Head+":"+p).Output()
+		data, _ = gitOut(src.Cwd, "show", "--end-of-options", src.Head+":"+p)
 	}
 	return data[:min(len(data), 512)]
 }
@@ -181,13 +206,12 @@ func FileDiff(src Source, f File) ([]Line, error) {
 		}
 		return lines, nil
 	}
-	args := append([]string{"-C", src.Cwd}, src.diffArgs("diff", "--no-color", "-U1000000", "-M")...)
-	args = append(args, "--")
+	args := append(src.diffArgs("diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U1000000", "-M"), "--")
 	if f.OldPath != "" {
 		args = append(args, f.OldPath)
 	}
 	args = append(args, f.Path)
-	out, err := exec.Command("git", args...).Output()
+	out, err := gitOut(src.Cwd, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +236,11 @@ func ParseFull(unified string) []Line {
 			old, nw, inHunk = a, c, true
 			continue
 		}
-		if !inHunk || l == "" {
+		if !inHunk {
 			continue
+		}
+		if l == "" {
+			l = " "
 		}
 		switch l[0] {
 		case ' ':

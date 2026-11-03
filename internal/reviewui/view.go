@@ -9,23 +9,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/review"
+	"github.com/benteven/deckhand/internal/style"
 	"github.com/benteven/deckhand/internal/textclean"
 )
 
 var (
-	white  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-	gray   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7c8291"))
-	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97757"))
-	yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("#e5b85c"))
-	green  = lipgloss.NewStyle().Foreground(lipgloss.Color("#8cc97a"))
-	red    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75"))
-	blue   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fb3ff"))
-	purple = lipgloss.NewStyle().Foreground(lipgloss.Color("#b39ddb"))
-	rule   = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	white  = style.White
+	gray   = style.Gray
+	orange = style.Orange
+	yellow = style.Yellow
+	green  = style.Green
+	red    = style.Red
+	blue   = style.Blue
+	purple = style.Purple
+	rule   = style.Rule
 	cursor = lipgloss.NewStyle().Background(lipgloss.Color("#2a2f3a"))
 )
 
-const hint = "j/k move  n next change  ]/[ file  J/K PR  c comment  t tests"
+const hint = "j/k move  n/N change  ]/[ file  J/K PR  c comment  t tests  tab claude"
 
 func (m *model) room() int {
 	return max(m.h-1, 1)
@@ -65,21 +66,23 @@ func (m *model) bottom() string {
 		status = red
 	}
 	switch {
-	case m.commenting && m.status != "":
-		return status.Render(ansi.Truncate(m.status, m.w, "…"))
-	case m.commenting:
-		return yellow.Render("comment › ") + m.input.View()
-	case m.status != "" && m.statusErr:
-		return red.Render(ansi.Truncate(m.status, m.w, "…"))
 	case m.status != "":
-		return yellow.Render(ansi.Truncate(m.status, m.w, "…"))
+		return status.Render(ansi.Truncate(textclean.Clean(m.status), m.w, "…"))
+	case m.commenting:
+		return yellow.Render("comment › ") + m.input.View() + gray.Render("  enter send  esc cancel")
 	}
 	return gray.Render(ansi.Truncate(hint, m.w, "…"))
 }
 
 func (m *model) fileColumn(w, h int) []string {
+	if !m.ready {
+		return []string{gray.Render("loading")}
+	}
 	head := white.Render(fmt.Sprintf("PR #%d", m.pr.Number)) + gray.Render("  J/K")
 	out := []string{ansi.Truncate(head, w, "…")}
+	if m.want != "" {
+		return append(out, gray.Render("loading"))
+	}
 	if m.err == nil && !m.src.CheckedOut {
 		out = append(out, yellow.Render(ansi.Truncate("not checked out", w, "…")))
 	}
@@ -113,37 +116,40 @@ func (m *model) fileColumn(w, h int) []string {
 }
 
 func fileLine(f review.File, selected bool, w int) string {
-	bar := "  "
-	if selected {
-		bar = orange.Render("▌") + " "
-	}
+	bar := style.SelectionBar(selected)
 	stats := green.Render(fmt.Sprintf("+%d", f.Added)) + " " + red.Render(fmt.Sprintf("-%d", f.Removed))
 	if f.Binary {
 		stats = gray.Render("bin")
 	}
-	room := w - 2 - ansi.StringWidth(stats) - 1
-	name := f.Path
-	if r := []rune(name); len(r) > room && room > 1 {
-		name = "…" + string(r[len(r)-room+1:])
+	room := max(w-2-ansi.StringWidth(stats)-1, 1)
+	name := textclean.Clean(f.Path)
+	if over := ansi.StringWidth(name) - room; over > 0 {
+		name = ansi.TruncateLeft(name, over+1, "…")
 	}
-	style := gray
+	look := gray
 	if selected {
-		style = white
+		look = white
 	}
-	return bar + style.Render(name) + strings.Repeat(" ", max(room-ansi.StringWidth(name), 0)+1) + stats
+	return ansi.Truncate(bar+look.Render(name)+strings.Repeat(" ", max(room-ansi.StringWidth(name), 0)+1)+stats, w, "")
 }
 
 func (m *model) diffView(w, h int) []string {
+	if !m.ready || m.want != "" {
+		return nil
+	}
 	if m.err != nil {
-		return []string{red.Render(ansi.Truncate(m.err.Error(), w, "…"))}
+		return []string{red.Render(ansi.Truncate(textclean.Clean(m.err.Error()), w, "…"))}
 	}
 	f, ok := m.selected()
+	if !ok && len(m.files) > 0 {
+		return []string{gray.Render(ansi.Truncate("Only tests and generated files, t shows them", w, "…"))}
+	}
 	if !ok {
 		return []string{gray.Render("No changes")}
 	}
-	title := f.Path
+	title := textclean.Clean(f.Path)
 	if f.OldPath != "" {
-		title = f.OldPath + " → " + f.Path
+		title = textclean.Clean(f.OldPath) + " → " + title
 	}
 	out := []string{blue.Render(ansi.Truncate(title, w, "…"))}
 	if f.Note != "" {
@@ -166,20 +172,20 @@ func (m *model) diffView(w, h int) []string {
 }
 
 func codeLine(l review.Line, atCursor bool, w int) string {
-	num, mark, style := l.New, " ", white
+	num, mark, look := l.New, " ", white
 	switch l.Kind {
 	case review.Add:
-		mark, style = "+", green
+		mark, look = "+", green
 	case review.Del:
-		num, mark, style = l.Old, "-", red
+		num, mark, look = l.Old, "-", red
 	}
 	n := "    "
 	if num > 0 {
 		n = fmt.Sprintf("%4d", num)
 	}
-	text := ansi.Truncate(n+" "+mark+" "+textclean.Clean(l.Text), w, "…")
+	text := ansi.Truncate(n+" "+mark+" "+textclean.Clean(l.Text), w-1, "…")
 	if atCursor {
-		return cursor.Inherit(style).Render(text + strings.Repeat(" ", max(w-ansi.StringWidth(text), 0)))
+		return orange.Render("▌") + cursor.Inherit(look).Render(text+strings.Repeat(" ", max(w-1-ansi.StringWidth(text), 0)))
 	}
-	return style.Render(text)
+	return " " + look.Render(text)
 }

@@ -125,20 +125,27 @@ func RemoveAccount(deckHome, name string) error {
 	return Trash(dir)
 }
 
-func (o Ops) StartReview(exe, id, claudePane string) error {
-	if err := o.Show(claudePane); err != nil {
-		return err
-	}
-	paneID, err := o.T.Run("split-window", "-d", "-v", "-b", "-l", "66%", "-P", "-F", "#{pane_id}", "-t", tmux.Slot, tmux.ReviewCommand(exe, id))
+const reviewSize = "66%"
+
+func (o Ops) ShowReview(exe, id, claudePane string) error {
+	panes, err := o.T.Panes()
 	if err != nil {
 		return err
 	}
-	paneID = strings.TrimSpace(paneID)
-	_, err = o.T.Run("set-option", "-p", "-t", paneID, "@deck-role", tmux.ReviewRole, ";", "set-option", "-p", "-t", paneID, tmux.ReviewOption, id)
-	return err
-}
-
-func (o Ops) ShowReview(claudePane, reviewPane string) error {
+	reviewPane := ""
+	for _, p := range panes {
+		if p.Role != tmux.ReviewRole || p.Review != id {
+			continue
+		}
+		if p.Dead {
+			o.T.Run("kill-pane", "-t", p.ID)
+			continue
+		}
+		reviewPane = p.ID
+	}
+	if reviewPane == "" {
+		return o.startReview(exe, id, claudePane)
+	}
 	current, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
 	if err != nil {
 		return err
@@ -149,8 +156,24 @@ func (o Ops) ShowReview(claudePane, reviewPane string) error {
 	if err := o.Show(claudePane); err != nil {
 		return err
 	}
-	_, err = o.T.Run("join-pane", "-d", "-v", "-b", "-l", "66%", "-s", reviewPane, "-t", tmux.Slot)
+	_, err = o.T.Run("join-pane", "-d", "-v", "-b", "-l", reviewSize, "-s", reviewPane, "-t", tmux.Slot)
 	return err
+}
+
+func (o Ops) startReview(exe, id, claudePane string) error {
+	if err := o.Show(claudePane); err != nil {
+		return err
+	}
+	paneID, err := o.T.Run("split-window", "-d", "-v", "-b", "-l", reviewSize, "-P", "-F", "#{pane_id}", "-t", tmux.Slot, tmux.ReviewCommand(exe, id))
+	if err != nil {
+		return err
+	}
+	paneID = strings.TrimSpace(paneID)
+	if _, err := o.T.Run("set-option", "-p", "-t", paneID, "@deck-role", tmux.ReviewRole, ";", "set-option", "-p", "-t", paneID, tmux.ReviewOption, id); err != nil {
+		o.T.Run("kill-pane", "-t", paneID)
+		return err
+	}
+	return nil
 }
 
 func (o Ops) mainPanes() ([]string, error) {

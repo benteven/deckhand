@@ -27,14 +27,14 @@ func TestFixedGroups(t *testing.T) {
 }
 
 func TestArrange(t *testing.T) {
-	files := []File{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}, {Path: "d.go"}, {Path: "a_test.go", Group: Tests}}
-	notes := []Note{{Path: "c.go", Group: "changes", Note: "core"}, {Path: "a.go", Group: "imports"}, {Path: "b.go", Group: "refactor"}, {Path: "a_test.go", Group: "changes"}}
+	files := []File{{Path: "a.go"}, {Path: "a2.go"}, {Path: "b.go"}, {Path: "m.go"}, {Path: "z.go"}, {Path: "a_test.go", Group: Tests}}
+	notes := []Note{{Path: "z.go", Group: "changes", Note: "core"}, {Path: "m.go", Group: "changes"}, {Path: "a.go", Group: "imports"}, {Path: "b.go", Group: "refactor"}, {Path: "a_test.go", Group: "changes"}}
 	got := Arrange(files, notes)
 	var paths []string
 	for _, f := range got {
 		paths = append(paths, f.Path)
 	}
-	assert.Equal(t, []string{"c.go", "d.go", "b.go", "a.go", "a_test.go"}, paths)
+	assert.Equal(t, []string{"z.go", "m.go", "a2.go", "b.go", "a.go", "a_test.go"}, paths)
 	assert.Equal(t, "core", got[0].Note)
-	assert.Equal(t, Tests, got[4].Group)
+	assert.Equal(t, Tests, got[5].Group)
 }

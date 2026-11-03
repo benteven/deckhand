@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type PR struct {
@@ -77,6 +78,30 @@ func (s State) Save(home, id string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), filepath.Join(dir, "review.json"))
+}
+
+func Update(home, id string, change func(*State) bool) (State, error) {
+	dir := Dir(home, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return State{}, err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "review.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return State{}, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return State{}, err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	s, _, err := Load(home, id)
+	if err != nil {
+		return State{}, err
+	}
+	if !change(&s) {
+		return s, nil
+	}
+	return s, s.Save(home, id)
 }
 
 func LoadAll(home string) map[string]State {

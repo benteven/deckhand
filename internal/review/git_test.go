@@ -1,7 +1,9 @@
 package review
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,7 +23,9 @@ func TestParseFull(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	git := func(args ...string) string {
 		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
 		require.NoError(t, err, string(out))
@@ -31,7 +35,9 @@ func TestResolve(t *testing.T) {
 	git("commit", "-q", "--allow-empty", "-m", "one")
 	first := git("rev-parse", "HEAD")
 	git("checkout", "-q", "-b", "feat")
-	git("commit", "-q", "--allow-empty", "-m", "two")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.go"), []byte("package f\n"), 0o644))
+	git("add", "f.go")
+	git("commit", "-q", "-m", "two")
 	git("checkout", "-q", "main")
 
 	pr := PR{Repo: "x/y", Base: "main", Head: "feat"}
@@ -47,5 +53,23 @@ func TestResolve(t *testing.T) {
 	assert.True(t, src.CheckedOut)
 
 	_, err = Resolve(t.TempDir(), pr)
+	assert.EqualError(t, err, "folder is not a checkout of x/y")
+
+	git("checkout", "-q", "main")
+	git("update-ref", "refs/remotes/origin/feat", "feat")
+	git("branch", "-q", "-D", "feat")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dirty.go"), []byte("package dirty\n"), 0o644))
+	git("remote", "add", "origin", "git@github.com:X/Y.git")
+	src, err = Resolve(dir, pr)
+	require.NoError(t, err)
+	assert.Equal(t, "origin/feat", src.Head)
+	assert.False(t, src.CheckedOut)
+	files, err := Changed(src)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, "f.go", files[0].Path)
+
+	git("remote", "set-url", "origin", "https://github.com/x/other")
+	_, err = Resolve(dir, pr)
 	assert.EqualError(t, err, "folder is not a checkout of x/y")
 }

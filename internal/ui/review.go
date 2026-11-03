@@ -2,9 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -13,6 +15,7 @@ import (
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/gh"
 	"github.com/benteven/deckhand/internal/review"
+	"github.com/benteven/deckhand/internal/textclean"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
 )
@@ -20,20 +23,27 @@ import (
 type prPicker struct {
 	id     string
 	prs    []transcript.PRLink
-	titles map[string]string
 	cursor int
 }
 
-type prTitleMsg struct{ url, title string }
+type prInfoMsg struct {
+	url  string
+	info gh.PR
+}
 
 func (m *model) isReview(id string) bool {
 	_, ok := m.reviews[id]
 	return ok
 }
 
+func (m *model) hasRow(id string) bool {
+	has := func(r deck.Row) bool { return r.SessionID == id }
+	return slices.ContainsFunc(m.active, has) || slices.ContainsFunc(m.suspended, has)
+}
+
 func (m *model) reviewOf(source string) (string, review.State, bool) {
 	for id, st := range m.reviews {
-		if st.Source == source {
+		if st.Source == source && m.hasRow(id) {
 			return id, st, true
 		}
 	}
@@ -55,19 +65,29 @@ func (m *model) openReview(r deck.Row) tea.Cmd {
 	case 1:
 		return m.reviewPR(r, prs, prs[0])
 	}
-	m.prPick = &prPicker{id: r.SessionID, prs: prs, titles: map[string]string{}}
+	m.prPick = &prPicker{id: r.SessionID, prs: prs}
 	var cmds []tea.Cmd
 	for _, pr := range prs {
+		if _, ok := m.prInfos[pr.URL]; ok {
+			continue
+		}
 		url := pr.URL
 		cmds = append(cmds, func() tea.Msg {
-			_, title, _, _, err := gh.Info(url)
+			info, err := gh.Info(url)
 			if err != nil {
 				return nil
 			}
-			return prTitleMsg{url: url, title: title}
+			return prInfoMsg{url: url, info: info}
 		})
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *model) gotPRInfo(msg prInfoMsg) {
+	if m.prInfos == nil {
+		m.prInfos = map[string]gh.PR{}
+	}
+	m.prInfos[msg.url] = msg.info
 }
 
 func (m *model) prPickKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -96,12 +116,39 @@ func (m *model) prPickLines(w int) []string {
 	var lines []string
 	for i, pr := range p.prs {
 		text := white.Render(fmt.Sprintf("#%d", pr.Number))
-		if t := p.titles[pr.URL]; t != "" {
-			text += " " + gray.Render(strings.Join(strings.Fields(t), " "))
+		if t := m.prInfos[pr.URL].Title; t != "" {
+			text += " " + gray.Render(strings.Join(strings.Fields(textclean.Clean(t)), " "))
 		}
 		lines = append(lines, ansi.Truncate("  "+selectionBar(i == p.cursor)+text, w, "…"))
 	}
 	return lines
+}
+
+func prInfos(links []transcript.PRLink, known map[string]gh.PR) map[string]gh.PR {
+	out := map[string]gh.PR{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, l := range links {
+		if info, ok := known[l.URL]; ok {
+			out[l.URL] = info
+			continue
+		}
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			if info, err := gh.Info(url); err == nil {
+				mu.Lock()
+				out[url] = info
+				mu.Unlock()
+			}
+		}(l.URL)
+	}
+	wg.Wait()
+	return out
+}
+
+func reviewPRFor(link transcript.PRLink, info gh.PR) review.PR {
+	return review.PR{Number: info.Number, URL: link.URL, Repo: link.Repo, Title: info.Title, Base: info.Base, Head: info.Head}
 }
 
 func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.PRLink) tea.Cmd {
@@ -109,26 +156,26 @@ func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.
 		m.hint = "Review is starting"
 		return nil
 	}
-	id, st, ok := m.reviewOf(r.SessionID)
+	id, _, ok := m.reviewOf(r.SessionID)
 	if !ok {
 		return m.startReview(r, prs, chosen)
 	}
-	home := m.home
+	home, known := m.home, maps.Clone(m.prInfos)
 	save := func() tea.Msg {
-		if fresh, ok, err := review.Load(home, id); err == nil && ok {
-			st = fresh
-		}
-		i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL })
-		if i < 0 {
-			n, title, base, head, err := gh.Info(chosen.URL)
-			if err != nil {
-				return errMsg{fmt.Errorf("PR #%d: %w", chosen.Number, err)}
+		_, err := review.Update(home, id, func(st *review.State) bool {
+			i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL })
+			if i < 0 {
+				info, ok := prInfos([]transcript.PRLink{chosen}, known)[chosen.URL]
+				if !ok {
+					return false
+				}
+				st.PRs = append(st.PRs, reviewPRFor(chosen, info))
+				i = len(st.PRs) - 1
 			}
-			st.PRs = append(st.PRs, review.PR{Number: n, URL: chosen.URL, Repo: chosen.Repo, Title: title, Base: base, Head: head})
-			i = len(st.PRs) - 1
-		}
-		st.Current = i
-		if err := st.Save(home, id); err != nil {
+			st.Current = i
+			return true
+		})
+		if err != nil {
 			return errMsg{err}
 		}
 		return nil
@@ -151,38 +198,47 @@ func (m *model) openRow(id string) tea.Cmd {
 }
 
 type reviewFailedMsg struct {
-	source string
-	err    error
+	id, source string
+	err        error
 }
 
 func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcript.PRLink) tea.Cmd {
 	id := uuid.NewV4().String()
-	account := m.launchAccount(id, m.state.AccountFor(r.SessionID))
-	ops, home := m.ops, m.home
+	m.setAccount(id, m.state.AccountFor(r.SessionID))
+	account := m.launchAccount(id, m.state.AccountFor(id))
+	ops, home, known := m.ops, m.home, maps.Clone(m.prInfos)
 	if m.startingReview == nil {
 		m.startingReview = map[string]bool{}
 	}
 	m.startingReview[r.SessionID] = true
 	m.hint = "Starting review"
 	return func() tea.Msg {
-		fail := func(err error) tea.Msg { return reviewFailedMsg{source: r.SessionID, err: err} }
+		fail := func(err error) tea.Msg {
+			os.RemoveAll(review.Dir(home, id))
+			return reviewFailedMsg{id: id, source: r.SessionID, err: err}
+		}
+		infos := prInfos(prs, known)
+		if _, ok := infos[chosen.URL]; !ok {
+			_, err := gh.Info(chosen.URL)
+			return fail(fmt.Errorf("PR #%d: %w", chosen.Number, err))
+		}
 		st := review.State{Source: r.SessionID, Cwd: r.Cwd}
 		for _, p := range prs {
-			n, title, base, head, err := gh.Info(p.URL)
-			if err != nil {
-				return fail(fmt.Errorf("PR #%d: %w", p.Number, err))
+			info, ok := infos[p.URL]
+			if !ok {
+				continue
 			}
 			if p.URL == chosen.URL {
 				st.Current = len(st.PRs)
 			}
-			st.PRs = append(st.PRs, review.PR{Number: n, URL: p.URL, Repo: p.Repo, Title: title, Base: base, Head: head})
+			st.PRs = append(st.PRs, reviewPRFor(p, info))
 		}
 		pr, _ := st.PR()
-		if _, err := review.Resolve(st.Cwd, pr); err != nil {
-			return fail(err)
-		}
-		review.Fetch(st.Cwd, pr)
 		src, err := review.Resolve(st.Cwd, pr)
+		if review.NeedsFetch(err) {
+			review.Fetch(st.Cwd, pr)
+			src, err = review.Resolve(st.Cwd, pr)
+		}
 		if err != nil {
 			return fail(err)
 		}
@@ -201,6 +257,8 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 
 func (m *model) reviewFailed(msg reviewFailedMsg) {
 	delete(m.startingReview, msg.source)
+	delete(m.state.Accounts, msg.id)
+	delete(m.state.Fallbacks, msg.id)
 	m.hint = ""
 	m.err = msg.err
 }
@@ -212,12 +270,6 @@ func (m *model) reviewStarted(id string, st review.State) {
 		m.reviews = map[string]review.State{}
 	}
 	m.reviews[id] = st
-	if account := m.state.AccountFor(st.Source); account != m.state.Account {
-		if m.state.Accounts == nil {
-			m.state.Accounts = map[string]string{}
-		}
-		m.state.Accounts[id] = account
-	}
 }
 
 func (m *model) syncReviews(panes []tmux.Pane, reviews map[string]review.State) []tea.Cmd {
@@ -260,30 +312,4 @@ func (m *model) reviewOfPane(pane string) string {
 		}
 	}
 	return ""
-}
-
-func showReview(ops deck.Ops, pane, id string) error {
-	panes, err := ops.T.Panes()
-	if err != nil {
-		return err
-	}
-	reviewPane := ""
-	for _, p := range panes {
-		if p.Role != tmux.ReviewRole || p.Review != id {
-			continue
-		}
-		if p.Dead {
-			ops.T.Run("kill-pane", "-t", p.ID)
-			continue
-		}
-		reviewPane = p.ID
-	}
-	if reviewPane == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		return ops.StartReview(exe, id, pane)
-	}
-	return ops.ShowReview(pane, reviewPane)
 }

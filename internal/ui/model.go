@@ -253,6 +253,7 @@ type model struct {
 	reviews  map[string]review.State
 
 	startingReview map[string]bool
+	prInfos        map[string]gh.PR
 	takeover       *takeoverDialog
 	quit           *quitDialog
 	del            *deleteDialog
@@ -442,10 +443,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 	case reviewFailedMsg:
 		m.reviewFailed(msg)
-	case prTitleMsg:
-		if m.prPick != nil {
-			m.prPick.titles[msg.url] = msg.title
-		}
+	case prInfoMsg:
+		m.gotPRInfo(msg)
 	case stopFailedMsg:
 		m.err = msg.err
 		delete(m.ending, msg.entry.SessionID)
@@ -1443,7 +1442,11 @@ func (m *model) show(pane, target string, preview bool) tea.Cmd {
 		}
 		var err error
 		if w.review != "" {
-			err = showReview(ops, w.pane, w.review)
+			exe, xerr := os.Executable()
+			if xerr != nil {
+				return errMsg{xerr}
+			}
+			err = ops.ShowReview(exe, w.review, w.pane)
 		} else {
 			err = ops.Show(w.pane)
 		}
