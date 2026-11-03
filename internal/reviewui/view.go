@@ -26,7 +26,7 @@ var (
 	cursor = lipgloss.NewStyle().Background(lipgloss.Color("#2a2f3a"))
 )
 
-const hint = "j/k move  n/N change  ]/[ file  J/K PR  c comment  t tests  tab claude"
+const hint = "j/k move  n/N change  h/l file  J/K PR  c comment  t tests  tab claude"
 
 func (m *model) room() int {
 	return max(m.h-1, 1)

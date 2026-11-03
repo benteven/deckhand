@@ -211,6 +211,7 @@ func WriteConf(path string, cfg store.Config) error {
 		"unbind -q -a",
 		fmt.Sprintf(`bind -n %s select-pane -t =deck:main.0 \; switch-client -T deck`, p),
 		"bind -T deck Any send-keys -t =deck:main.0",
+		`bind -T deck Tab if -F "#{==:#{window_panes},3}" "select-pane -t =deck:main.1" "send-keys -t =deck:main.0 Tab"`,
 		slotKey("C-j"),
 		slotKey("C-k"),
 		slotKey("C-q"),

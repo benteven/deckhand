@@ -341,7 +341,11 @@ func (m *model) diffed(msg diffMsg) {
 
 func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	m.status, m.statusErr = "", false
-	switch msg.String() {
+	key := msg.String()
+	if msg.Text == "]" || msg.Text == "[" {
+		key = msg.Text
+	}
+	switch key {
 	case "j", "down":
 		m.moveLine(1)
 	case "k", "up":
@@ -354,9 +358,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 		m.nextChange(1)
 	case "N":
 		m.nextChange(-1)
-	case "]":
+	case "]", "l", "right":
 		return m.moveFile(1)
-	case "[":
+	case "[", "h", "left":
 		return m.moveFile(-1)
 	case "J":
 		return m.movePR(1)

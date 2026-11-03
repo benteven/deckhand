@@ -26,6 +26,7 @@ func helpSections(prefix string) []helpSection {
 			{p + " ?", "This help"},
 			{p + " " + p, "Same as ctrl-q"},
 			{p + " ctrl-j / k / q", "Send that key to Claude Code"},
+			{p + " tab", "Back to the files from the review Claude"},
 		}},
 		{"In the list", [][2]string{
 			{"↑↓ / j k", "Move; the right side follows"},
