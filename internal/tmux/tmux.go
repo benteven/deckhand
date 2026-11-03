@@ -11,15 +11,17 @@ import (
 )
 
 const (
-	DeckSession = "=deck"
-	BgSession   = "=deck-bg"
-	ListPane    = DeckSession + ":main.0"
-	Slot        = DeckSession + ":main.1"
-	WidthOption = "@deck-list-width"
-	NextKey     = "\ue000"
-	PrevKey     = "\ue001"
-	LastKey     = "\ue002"
-	BackKey     = "\ue003"
+	DeckSession  = "=deck"
+	BgSession    = "=deck-bg"
+	ListPane     = DeckSession + ":main.0"
+	Slot         = DeckSession + ":main.1"
+	WidthOption  = "@deck-list-width"
+	NextKey      = "\ue000"
+	PrevKey      = "\ue001"
+	LastKey      = "\ue002"
+	BackKey      = "\ue003"
+	ReviewRole   = "review"
+	ReviewOption = "@deck-review"
 )
 
 type Client struct {
@@ -28,7 +30,7 @@ type Client struct {
 
 type Pane struct {
 	ID, SessionID, Role, Target string
-	Account                     string
+	Account, Review             string
 	PID                         int
 	Dead                        bool
 }
@@ -46,7 +48,7 @@ func (c Client) Run(args ...string) (string, error) {
 func (c Client) Panes() ([]Pane, error) {
 	format := strings.Join([]string{
 		"#{pane_id}", "#{@deck-session}", "#{@deck-role}",
-		"#{session_name}:#{window_name}.#{pane_index}", "#{pane_pid}", "#{pane_dead}", "#{@deck-account}",
+		"#{session_name}:#{window_name}.#{pane_index}", "#{pane_pid}", "#{pane_dead}", "#{@deck-account}", "#{" + ReviewOption + "}",
 	}, "\t")
 	out, err := c.Run("list-panes", "-a", "-F", format)
 	if err != nil {
@@ -55,11 +57,11 @@ func (c Client) Panes() ([]Pane, error) {
 	var panes []Pane
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 7 {
+		if len(f) != 8 {
 			continue
 		}
 		pid, _ := strconv.Atoi(f[4])
-		panes = append(panes, Pane{ID: f[0], SessionID: f[1], Role: f[2], Target: f[3], PID: pid, Dead: f[5] == "1", Account: f[6]})
+		panes = append(panes, Pane{ID: f[0], SessionID: f[1], Role: f[2], Target: f[3], PID: pid, Dead: f[5] == "1", Account: f[6], Review: f[7]})
 	}
 	return panes, nil
 }
@@ -100,14 +102,18 @@ func previewCommand(exe string) string {
 	return ShellQuote(exe) + " preview"
 }
 
+func ReviewCommand(exe, id string) string {
+	return ShellQuote(exe) + " review " + ShellQuote(id)
+}
+
 func (c Client) Reload(exe, build string) error {
-	out, err := c.Run("list-panes", "-a", "-F", "#{pane_id}\t#{@deck-role}\t#{"+BuildOption+"}")
+	out, err := c.Run("list-panes", "-a", "-F", "#{pane_id}\t#{@deck-role}\t#{"+BuildOption+"}\t#{"+ReviewOption+"}")
 	if err != nil {
 		return err
 	}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 3 || (build != "" && f[2] == build) {
+		if len(f) != 4 || (build != "" && f[2] == build) {
 			continue
 		}
 		var cmd string
@@ -116,6 +122,8 @@ func (c Client) Reload(exe, build string) error {
 			cmd = listCommand(exe)
 		case "preview":
 			cmd = previewCommand(exe)
+		case ReviewRole:
+			cmd = ReviewCommand(exe, f[3])
 		default:
 			continue
 		}

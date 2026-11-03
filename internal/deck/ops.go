@@ -121,7 +121,60 @@ func RemoveAccount(deckHome, name string) error {
 	return Trash(dir)
 }
 
+func (o Ops) StartReview(exe, id string) (string, error) {
+	paneID, err := o.T.Run("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", tmux.BgSession+":", tmux.ReviewCommand(exe, id))
+	if err != nil {
+		return "", err
+	}
+	paneID = strings.TrimSpace(paneID)
+	_, err = o.T.Run("set-option", "-p", "-t", paneID, "@deck-role", tmux.ReviewRole, ";", "set-option", "-p", "-t", paneID, tmux.ReviewOption, id)
+	return paneID, err
+}
+
+func (o Ops) ShowReview(claudePane, reviewPane string) error {
+	current, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(current) == reviewPane {
+		return nil
+	}
+	if err := o.Show(claudePane); err != nil {
+		return err
+	}
+	_, err = o.T.Run("join-pane", "-d", "-v", "-b", "-l", "66%", "-s", reviewPane, "-t", tmux.Slot)
+	return err
+}
+
+func (o Ops) mainPanes() ([]string, error) {
+	out, err := o.T.Run("list-panes", "-t", tmux.DeckSession+":main", "-F", "#{pane_id}\t#{@deck-role}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func (o Ops) parkReviews() error {
+	lines, err := o.mainPanes()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		id, role, _ := strings.Cut(line, "\t")
+		if role != tmux.ReviewRole {
+			continue
+		}
+		if _, err := o.T.Run("break-pane", "-d", "-s", id, "-t", tmux.BgSession+":"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (o Ops) Show(paneID string) error {
+	if err := o.parkReviews(); err != nil {
+		return err
+	}
 	current, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
 	if err != nil {
 		return err
@@ -145,12 +198,14 @@ func (o Ops) Stop(paneID string, busy bool) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	slot, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
+	lines, err := o.mainPanes()
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(slot) == paneID {
-		return fmt.Errorf("pane %s is still in the slot", paneID)
+	for _, line := range lines {
+		if id, _, _ := strings.Cut(line, "\t"); id == paneID {
+			return fmt.Errorf("pane %s is still in the slot", paneID)
+		}
 	}
 	out, err := o.T.Run("display-message", "-p", "-t", paneID, "#{pane_dead} #{pane_pid}")
 	if err != nil {
