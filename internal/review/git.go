@@ -177,7 +177,10 @@ func FileDiff(src Source, f File) ([]Line, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseFull(string(out)), nil
+	if lines := ParseFull(string(out)); len(lines) > 0 {
+		return lines, nil
+	}
+	return []Line{{Kind: Same, Text: "no content changes"}}, nil
 }
 
 func ParseFull(unified string) []Line {

@@ -77,7 +77,7 @@ func (m *model) bottom() string {
 }
 
 func (m *model) fileColumn(w, h int) []string {
-	head := white.Render(fmt.Sprintf("#%d", m.pr.Number)) + gray.Render("  J/K PR")
+	head := white.Render(fmt.Sprintf("PR #%d", m.pr.Number)) + gray.Render("  J/K")
 	out := []string{ansi.Truncate(head, w, "…")}
 	if m.err == nil && !m.src.CheckedOut {
 		out = append(out, yellow.Render(ansi.Truncate("not checked out", w, "…")))

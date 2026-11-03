@@ -179,6 +179,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.input.SetWidth(max(m.w-12, 1))
+		return m, tea.ClearScreen
 	case tickMsg:
 		return m, tea.Batch(m.checkFP(), tick())
 	case fpMsg:
