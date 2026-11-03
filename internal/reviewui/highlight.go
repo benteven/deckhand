@@ -9,6 +9,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/textclean"
@@ -19,38 +20,40 @@ type span struct {
 	fg   color.Color
 }
 
-const maxHighlight = 20000
+const (
+	maxHighlight = 1 << 20
+	maxLine      = 2000
+)
 
 var theme = styles.Get("github-dark")
 
 func plain(l review.Line) []span {
-	return []span{{text: textclean.Clean(l.Text)}}
+	text := textclean.Clean(l.Text)
+	if len(text) > maxLine {
+		text = ansi.Truncate(text, maxLine, "…")
+	}
+	return []span{{text: text}}
 }
 
 func highlight(path string, lines []review.Line) [][]span {
 	out := make([][]span, len(lines))
-	lexer := lexers.Match(filepath.Base(path))
-	if lexer == nil || len(lines) > maxHighlight {
-		for i, l := range lines {
-			out[i] = plain(l)
-		}
-		return out
-	}
-	lexer = chroma.Coalesce(lexer)
-	for _, side := range []review.LineKind{review.Add, review.Del} {
-		var idx []int
-		var b strings.Builder
-		for i, l := range lines {
-			if l.Kind == review.Same || l.Kind == side {
-				idx = append(idx, i)
-				b.WriteString(l.Text)
-				b.WriteByte('\n')
+	if lexer := lexers.Match(filepath.Base(path)); lexer != nil && lexable(lines) {
+		lexer = chroma.Coalesce(lexer)
+		for _, side := range []review.LineKind{review.Add, review.Del} {
+			var idx []int
+			var b strings.Builder
+			for i, l := range lines {
+				if l.Kind == review.Same || l.Kind == side {
+					idx = append(idx, i)
+					b.WriteString(textclean.Clean(l.Text))
+					b.WriteByte('\n')
+				}
 			}
-		}
-		rows := tokenize(lexer, b.String(), len(idx))
-		for j, i := range idx {
-			if out[i] == nil {
-				out[i] = rows[j]
+			rows := tokenize(lexer, b.String(), len(idx))
+			for j, i := range idx {
+				if out[i] == nil {
+					out[i] = rows[j]
+				}
 			}
 		}
 	}
@@ -60,6 +63,17 @@ func highlight(path string, lines []review.Line) [][]span {
 		}
 	}
 	return out
+}
+
+func lexable(lines []review.Line) bool {
+	size := 0
+	for _, l := range lines {
+		if len(l.Text) > maxLine {
+			return false
+		}
+		size += len(l.Text)
+	}
+	return size <= maxHighlight
 }
 
 func tokenize(lexer chroma.Lexer, text string, n int) [][]span {
@@ -75,13 +89,8 @@ func tokenize(lexer chroma.Lexer, text string, n int) [][]span {
 				r++
 			}
 			if part != "" && r < n {
-				rows[r] = append(rows[r], span{text: textclean.Clean(part), fg: tokenColor(t.Type)})
+				rows[r] = append(rows[r], span{text: part, fg: tokenColor(t.Type)})
 			}
-		}
-	}
-	for i := range rows {
-		if rows[i] == nil {
-			rows[i] = []span{}
 		}
 	}
 	return rows

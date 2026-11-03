@@ -55,6 +55,9 @@ func Load(home, id string) (State, bool, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return State{}, false, err
 	}
+	if pr, ok := s.PR(); ok {
+		s.SortAndSelect(pr.URL)
+	}
 	return s, true, nil
 }
 
@@ -140,12 +143,34 @@ func LoadNotes(path string) ([]Note, error) {
 	return v.Files, nil
 }
 
+func parentOf(child, parent PR) bool {
+	return parent.URL != child.URL && parent.Repo == child.Repo && parent.Head != "" && parent.Head == child.Base
+}
+
+func Stack(seed, open []PR, trunk string) []PR {
+	out := slices.Clone(seed)
+	linked := func(p PR) bool {
+		return slices.ContainsFunc(out, func(q PR) bool {
+			return (parentOf(p, q) && p.Base != trunk) || (parentOf(q, p) && q.Base != trunk)
+		})
+	}
+	for grew := true; grew; {
+		grew = false
+		for _, p := range open {
+			if !slices.ContainsFunc(out, func(q PR) bool { return q.URL == p.URL }) && linked(p) {
+				out = append(out, p)
+				grew = true
+			}
+		}
+	}
+	return out
+}
+
 func MergeOrder(prs []PR) []PR {
 	sorted := slices.SortedFunc(slices.Values(prs), func(a, b PR) int { return cmp.Compare(a.Number, b.Number) })
-	parent := func(p PR) int {
-		return slices.IndexFunc(sorted, func(q PR) bool {
-			return q.URL != p.URL && q.Repo == p.Repo && q.Head != "" && q.Head == p.Base
-		})
+	parent := make([]int, len(sorted))
+	for i, p := range sorted {
+		parent[i] = slices.IndexFunc(sorted, func(q PR) bool { return parentOf(p, q) })
 	}
 	out := make([]PR, 0, len(sorted))
 	done := make([]bool, len(sorted))
@@ -156,14 +181,14 @@ func MergeOrder(prs []PR) []PR {
 		}
 		done[i] = true
 		out = append(out, sorted[i])
-		for j, q := range sorted {
-			if parent(q) == i {
+		for j := range sorted {
+			if parent[j] == i {
 				add(j)
 			}
 		}
 	}
-	for i, p := range sorted {
-		if parent(p) < 0 {
+	for i := range sorted {
+		if parent[i] < 0 {
 			add(i)
 		}
 	}
@@ -171,4 +196,9 @@ func MergeOrder(prs []PR) []PR {
 		add(i)
 	}
 	return out
+}
+
+func (s *State) SortAndSelect(url string) {
+	s.PRs = MergeOrder(s.PRs)
+	s.Current = max(slices.IndexFunc(s.PRs, func(p PR) bool { return p.URL == url }), 0)
 }

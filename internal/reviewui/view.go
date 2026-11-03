@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/style"
@@ -41,6 +42,10 @@ func (m *model) room() int {
 	return max(m.h-1, 1)
 }
 
+func (m *model) diffWidth() int {
+	return m.w - min(30, m.w/3) - 1
+}
+
 func (m *model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
@@ -51,10 +56,9 @@ func (m *model) render() string {
 	if m.w < 10 || m.h < 3 {
 		return ""
 	}
-	colW := min(30, m.w/3)
-	diffW := m.w - colW - 1
+	colW := m.w - m.diffWidth() - 1
 	left := m.fileColumn(colW, m.room())
-	right := m.diffView(diffW, m.room())
+	right := m.diffView(m.diffWidth(), m.room())
 	lines := make([]string, 0, m.h)
 	for i := 0; i < m.room(); i++ {
 		l, r := "", ""
@@ -168,11 +172,19 @@ func (m *model) diffView(w, h int) []string {
 		}
 	}
 	room := max(h-len(out), 1)
-	rows := func(i int) int { return rowCount(m.lines[i], m.codeAt(i), w) }
-	if m.center {
-		m.center = false
+	rows := func(i int) int { return len(m.rowStarts(i, w)) }
+	if m.recenter && len(m.lines) > 0 {
+		m.recenter = false
 		m.centerBlock(room, rows)
 	}
+	m.follow(room, rows)
+	for i := m.top; i < len(m.lines) && len(out) < h; i++ {
+		out = append(out, m.codeRows(i, w, h-len(out))...)
+	}
+	return out
+}
+
+func (m *model) follow(room int, rows func(int) int) {
 	if m.cur < m.top {
 		m.top = m.cur
 	}
@@ -184,14 +196,6 @@ func (m *model) diffView(w, h int) []string {
 		used -= rows(m.top)
 		m.top++
 	}
-	for i := m.top; i < len(m.lines) && len(out) < h; i++ {
-		for _, r := range codeRows(m.lines[i], m.codeAt(i), i == m.cur, w) {
-			if len(out) < h {
-				out = append(out, r)
-			}
-		}
-	}
-	return out
 }
 
 func (m *model) centerBlock(room int, rows func(int) int) {
@@ -219,14 +223,17 @@ func (m *model) centerBlock(room int, rows func(int) int) {
 	}
 }
 
-func (m *model) codeAt(i int) []span {
-	if len(m.code) == len(m.lines) {
-		return m.code[i]
+func (m *model) rowStarts(i, w int) []int {
+	if m.layoutW != w || len(m.layout) != len(m.lines) {
+		m.layout, m.layoutW = make([][]int, len(m.lines)), w
 	}
-	return plain(m.lines[i])
+	if m.layout[i] == nil {
+		m.layout[i] = rowStarts(m.code[i], codeWidth(m.lines[i], w))
+	}
+	return m.layout[i]
 }
 
-func gutter(l review.Line) (string, lipgloss.Style, color.Color) {
+func gutter(l review.Line) (head string, fg, bg color.Color) {
 	num, mark, look, bg := l.New, " ", gray, color.Color(nil)
 	switch l.Kind {
 	case review.Add:
@@ -238,18 +245,24 @@ func gutter(l review.Line) (string, lipgloss.Style, color.Color) {
 	if num > 0 {
 		n = fmt.Sprintf("%4d", num)
 	}
-	return n + " " + mark + " ", look, bg
+	return n + " " + mark + " ", look.GetForeground(), bg
 }
 
-func breaks(code []span, width int) []int {
+func codeWidth(l review.Line, w int) int {
+	head, _, _ := gutter(l)
+	return max(w-1-ansi.StringWidth(head), 1)
+}
+
+func rowStarts(code []span, width int) []int {
 	var pos []int
 	var space []bool
 	at := 0
 	for _, s := range code {
-		for _, r := range s.text {
+		g := graphemes.FromString(s.text)
+		for g.Next() {
 			pos = append(pos, at)
-			space = append(space, r == ' ')
-			at += ansi.StringWidth(string(r))
+			space = append(space, g.Value() == " ")
+			at += ansi.StringWidth(g.Value())
 		}
 	}
 	pos = append(pos, at)
@@ -271,23 +284,32 @@ func breaks(code []span, width int) []int {
 	return starts
 }
 
-func rowCount(l review.Line, code []span, w int) int {
-	head, _, _ := gutter(l)
-	return len(breaks(code, max(w-1-ansi.StringWidth(head), 1)))
+func cutSpans(code []span, lo, hi int) []span {
+	var out []span
+	at := 0
+	for _, s := range code {
+		sw := ansi.StringWidth(s.text)
+		if a, z := max(lo, at), min(hi, at+sw); a < z {
+			out = append(out, span{text: ansi.Cut(s.text, a-at, z-at), fg: s.fg})
+		}
+		at += sw
+	}
+	return out
 }
 
-func codeRows(l review.Line, code []span, atCursor bool, w int) []string {
-	head, look, bg := gutter(l)
+func (m *model) codeRows(i, w, limit int) []string {
+	l, code := m.lines[i], m.code[i]
+	head, fg, bg := gutter(l)
 	bar := " "
-	if atCursor {
+	if i == m.cur {
 		bar = orange.Render("▌")
 		bg = cursorBg[l.Kind]
 	}
-	width := max(w-1-ansi.StringWidth(head), 1)
+	width := codeWidth(l, w)
 	blank := strings.Repeat(" ", ansi.StringWidth(head))
-	starts := breaks(code, width)
-	out := make([]string, 0, len(starts))
-	for r, lo := range starts {
+	starts := m.rowStarts(i, w)
+	out := make([]string, 0, min(len(starts), limit))
+	for r, lo := range starts[:min(len(starts), limit)] {
 		hi := math.MaxInt
 		if r+1 < len(starts) {
 			hi = starts[r+1]
@@ -298,16 +320,11 @@ func codeRows(l review.Line, code []span, atCursor bool, w int) []string {
 		}
 		var b strings.Builder
 		b.WriteString(bar)
-		b.WriteString(paint(look.GetForeground(), bg).Render(g))
-		at, used := 0, 0
-		for _, s := range code {
-			sw := ansi.StringWidth(s.text)
-			if a, z := max(lo, at), min(hi, at+sw); a < z {
-				part := ansi.Cut(s.text, a-at, z-at)
-				used += ansi.StringWidth(part)
-				b.WriteString(paint(s.fg, bg).Render(part))
-			}
-			at += sw
+		b.WriteString(paint(fg, bg).Render(g))
+		used := 0
+		for _, s := range cutSpans(code, lo, hi) {
+			used += ansi.StringWidth(s.text)
+			b.WriteString(paint(s.fg, bg).Render(s.text))
 		}
 		b.WriteString(paint(nil, bg).Render(strings.Repeat(" ", max(width-used, 0))))
 		out = append(out, b.String())

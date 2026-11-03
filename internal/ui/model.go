@@ -253,6 +253,7 @@ type model struct {
 	reviews  map[string]review.State
 
 	startingReview map[string]bool
+	findingPRs     map[string]bool
 	prInfos        map[string]gh.PR
 	takeover       *takeoverDialog
 	quit           *quitDialog

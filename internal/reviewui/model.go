@@ -37,7 +37,9 @@ type model struct {
 	lines      []review.Line
 	code       [][]span
 	cur, top   int
-	center     bool
+	recenter   bool
+	layout     [][]int
+	layoutW    int
 	w, h       int
 	commenting bool
 	input      textinput.Model
@@ -192,7 +194,7 @@ func (m *model) checkFP() tea.Cmd {
 func (m *model) diff() tea.Cmd {
 	f, ok := m.selected()
 	if !ok {
-		m.lines, m.path = nil, ""
+		m.lines, m.code, m.path = nil, nil, ""
 		return nil
 	}
 	src := m.src
@@ -320,7 +322,7 @@ func (m *model) diffed(msg diffMsg) {
 		return
 	}
 	if msg.err != nil {
-		m.lines, m.path = nil, msg.path
+		m.lines, m.code, m.path = nil, nil, msg.path
 		m.status, m.statusErr = msg.err.Error(), true
 		return
 	}
@@ -328,11 +330,11 @@ func (m *model) diffed(msg diffMsg) {
 	if msg.path == m.path && m.cur < len(m.lines) {
 		at = m.lines[m.cur]
 	}
-	m.lines, m.code = msg.lines, msg.code
+	m.lines, m.code, m.layout = msg.lines, msg.code, nil
 	if msg.path != m.path {
 		m.path, m.cur, m.top = msg.path, 0, 0
 		if i := slices.IndexFunc(m.lines, func(l review.Line) bool { return l.Kind != review.Same }); i >= 0 {
-			m.cur, m.center = i, true
+			m.cur, m.recenter = i, true
 		}
 		return
 	}
@@ -350,9 +352,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "k", "up":
 		m.moveLine(-1)
 	case "ctrl+d", "pgdown":
-		m.moveLine(m.room() / 2)
+		m.page(1)
 	case "ctrl+u", "pgup":
-		m.moveLine(-m.room() / 2)
+		m.page(-1)
 	case "n":
 		m.nextChange(1)
 	case "N":
@@ -393,13 +395,25 @@ func (m *model) moveLine(d int) {
 	m.cur = min(max(m.cur+d, 0), max(len(m.lines)-1, 0))
 }
 
+func (m *model) page(d int) {
+	w := m.diffWidth()
+	for left := m.room() / 2; left > 0; {
+		next := m.cur + d
+		if next < 0 || next >= len(m.lines) {
+			return
+		}
+		m.cur = next
+		left -= len(m.rowStarts(next, w))
+	}
+}
+
 func (m *model) nextChange(d int) {
 	start := func(i int) bool {
 		return m.lines[i].Kind != review.Same && (i == 0 || m.lines[i-1].Kind == review.Same)
 	}
 	for i := m.cur + d; i >= 0 && i < len(m.lines); i += d {
 		if start(i) {
-			m.cur, m.center = i, true
+			m.cur, m.recenter = i, true
 			return
 		}
 	}
@@ -423,7 +437,7 @@ func (m *model) movePR(d int) tea.Cmd {
 	m.st.Current = next
 	m.pr = m.st.PRs[next]
 	m.want = m.pr.URL
-	m.files, m.lines, m.path, m.sel = nil, nil, "", -1
+	m.files, m.lines, m.code, m.path, m.sel = nil, nil, nil, "", -1
 	home, id, want := m.home, m.id, m.want
 	save := func() tea.Msg {
 		_, err := review.Update(home, id, func(s *review.State) bool {

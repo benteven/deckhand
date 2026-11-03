@@ -57,14 +57,21 @@ func (m *model) reviewable(r deck.Row) []transcript.PRLink {
 	return visiblePRs(r.Summary.PRs, m.prState)
 }
 
+const findingHint = "Finding PRs"
+
+type repoPRs struct {
+	open  []gh.PR
+	trunk string
+}
+
 type stackMsg struct {
-	id   string
-	open map[string][]gh.PR
+	id    string
+	repos map[string]repoPRs
 }
 
 func (m *model) openReview(r deck.Row) tea.Cmd {
 	prs := m.reviewable(r)
-	if len(prs) == 0 {
+	if len(prs) == 0 || m.findingPRs[r.SessionID] {
 		return nil
 	}
 	var repos []string
@@ -74,36 +81,45 @@ func (m *model) openReview(r deck.Row) tea.Cmd {
 		}
 	}
 	id := r.SessionID
-	m.hint = "Finding PRs"
+	if m.findingPRs == nil {
+		m.findingPRs = map[string]bool{}
+	}
+	m.findingPRs[id] = true
+	m.hint = findingHint
 	return func() tea.Msg {
-		open := map[string][]gh.PR{}
+		found := map[string]repoPRs{}
 		for _, repo := range repos {
-			if list, err := gh.Open(repo); err == nil {
-				open[repo] = list
+			var trunk string
+			var wg sync.WaitGroup
+			wg.Go(func() { trunk, _ = gh.DefaultBranch(repo) })
+			open, err := gh.OpenPRs(repo)
+			wg.Wait()
+			if err == nil && trunk != "" {
+				found[repo] = repoPRs{open: open, trunk: trunk}
 			}
 		}
-		return stackMsg{id: id, open: open}
+		return stackMsg{id: id, repos: found}
 	}
 }
 
 func (m *model) gotStack(msg stackMsg) tea.Cmd {
-	if m.hint == "Finding PRs" {
+	delete(m.findingPRs, msg.id)
+	if m.hint == findingHint {
 		m.hint = ""
 	}
-	i := slices.IndexFunc(m.shown(), func(r deck.Row) bool { return r.SessionID == msg.id })
-	if i < 0 {
+	r, ok := m.current()
+	if !ok || r.SessionID != msg.id || m.dialogOpen() {
 		return nil
 	}
-	r := m.shown()[i]
 	if m.prInfos == nil {
 		m.prInfos = map[string]gh.PR{}
 	}
-	for _, list := range msg.open {
-		for _, p := range list {
+	for _, f := range msg.repos {
+		for _, p := range f.open {
 			m.prInfos[p.URL] = p
 		}
 	}
-	prs := stackOf(m.reviewable(r), msg.open, m.prInfos)
+	prs := m.stackOf(m.reviewable(r), msg.repos)
 	switch len(prs) {
 	case 0:
 		return nil
@@ -136,26 +152,27 @@ func (m *model) gotPRInfo(msg prInfoMsg) {
 	if p := m.prPick; p != nil {
 		at := p.prs[p.cursor].URL
 		p.prs = mergeOrder(p.prs, m.prInfos)
-		p.cursor = slices.IndexFunc(p.prs, func(l transcript.PRLink) bool { return l.URL == at })
+		p.cursor = max(slices.IndexFunc(p.prs, func(l transcript.PRLink) bool { return l.URL == at }), 0)
 	}
 }
 
-func stackOf(seed []transcript.PRLink, open map[string][]gh.PR, infos map[string]gh.PR) []transcript.PRLink {
+func (m *model) stackOf(seed []transcript.PRLink, repos map[string]repoPRs) []transcript.PRLink {
 	out := slices.Clone(seed)
-	linked := func(repo string, p gh.PR) bool {
-		return slices.ContainsFunc(out, func(l transcript.PRLink) bool {
-			q := infos[l.URL]
-			return l.Repo == repo && q.Head != "" && (q.Head == p.Base || q.Base == p.Head)
-		})
-	}
-	for grew := true; grew; {
-		grew = false
-		for repo, list := range open {
-			for _, p := range list {
-				if !slices.ContainsFunc(out, func(l transcript.PRLink) bool { return l.URL == p.URL }) && linked(repo, p) {
-					out = append(out, transcript.PRLink{Number: p.Number, URL: p.URL, Repo: repo})
-					grew = true
-				}
+	for repo, f := range repos {
+		var mine, open []review.PR
+		for _, l := range seed {
+			if info, ok := m.prInfos[l.URL]; ok && l.Repo == repo {
+				mine = append(mine, reviewPRFor(l, info))
+			}
+		}
+		for _, p := range f.open {
+			if !p.Fork {
+				open = append(open, reviewPRFor(transcript.PRLink{Number: p.Number, URL: p.URL, Repo: repo}, p))
+			}
+		}
+		for _, p := range review.Stack(mine, open, f.trunk) {
+			if !slices.ContainsFunc(out, func(l transcript.PRLink) bool { return l.URL == p.URL }) {
+				out = append(out, transcript.PRLink{Number: p.Number, URL: p.URL, Repo: repo})
 			}
 		}
 	}
@@ -176,11 +193,6 @@ func mergeOrder(links []transcript.PRLink, infos map[string]gh.PR) []transcript.
 		out = append(out, links[slices.IndexFunc(links, func(l transcript.PRLink) bool { return l.URL == p.URL })])
 	}
 	return out
-}
-
-func currentAt(st *review.State, url string) {
-	st.PRs = review.MergeOrder(st.PRs)
-	st.Current = slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == url })
 }
 
 func (m *model) prPickKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -263,7 +275,7 @@ func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.
 				}
 				st.PRs = append(st.PRs, reviewPRFor(chosen, info))
 			}
-			currentAt(st, chosen.URL)
+			st.SortAndSelect(chosen.URL)
 			return true
 		})
 		if err != nil {
@@ -321,7 +333,7 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 			}
 			st.PRs = append(st.PRs, reviewPRFor(p, info))
 		}
-		currentAt(&st, chosen.URL)
+		st.SortAndSelect(chosen.URL)
 		pr, _ := st.PR()
 		src, err := review.Resolve(st.Cwd, pr)
 		if review.NeedsFetch(err) {
