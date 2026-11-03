@@ -2,11 +2,14 @@ package reviewui
 
 import (
 	"fmt"
+	"image/color"
+	"math"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/style"
@@ -23,13 +26,24 @@ var (
 	blue   = style.Blue
 	purple = style.Purple
 	rule   = style.Rule
-	cursor = lipgloss.NewStyle().Background(lipgloss.Color("#2a2f3a"))
+	addBg  = lipgloss.Color("#1d3324")
+	delBg  = lipgloss.Color("#3b2024")
 )
+
+var cursorBg = map[review.LineKind]color.Color{
+	review.Same: lipgloss.Color("#2a2f3a"),
+	review.Add:  lipgloss.Color("#2a4a35"),
+	review.Del:  lipgloss.Color("#552a30"),
+}
 
 const hint = "j/k move  n/N change  ]/[ file  J/K PR  c comment  t tests  tab claude"
 
 func (m *model) room() int {
 	return max(m.h-1, 1)
+}
+
+func (m *model) diffWidth() int {
+	return m.w - min(30, m.w/3) - 1
 }
 
 func (m *model) View() tea.View {
@@ -42,10 +56,9 @@ func (m *model) render() string {
 	if m.w < 10 || m.h < 3 {
 		return ""
 	}
-	colW := min(30, m.w/3)
-	diffW := m.w - colW - 1
+	colW := m.w - m.diffWidth() - 1
 	left := m.fileColumn(colW, m.room())
-	right := m.diffView(diffW, m.room())
+	right := m.diffView(m.diffWidth(), m.room())
 	lines := make([]string, 0, m.h)
 	for i := 0; i < m.room(); i++ {
 		l, r := "", ""
@@ -159,33 +172,173 @@ func (m *model) diffView(w, h int) []string {
 		}
 	}
 	room := max(h-len(out), 1)
-	if m.cur < m.top {
-		m.top = m.cur
+	rows := func(i int) int { return len(m.rowStarts(i, w)) }
+	if m.recenter && len(m.lines) > 0 {
+		m.recenter = false
+		m.centerBlock(room, rows)
 	}
-	if m.cur >= m.top+room {
-		m.top = m.cur - room + 1
-	}
-	for i := m.top; i < len(m.lines) && i < m.top+room; i++ {
-		out = append(out, codeLine(m.lines[i], i == m.cur, w))
+	m.follow(room, rows)
+	for i := m.top; i < len(m.lines) && len(out) < h; i++ {
+		out = append(out, m.codeRows(i, w, h-len(out))...)
 	}
 	return out
 }
 
-func codeLine(l review.Line, atCursor bool, w int) string {
-	num, mark, look := l.New, " ", white
+func (m *model) follow(room int, rows func(int) int) {
+	if m.cur < m.top {
+		m.top = m.cur
+	}
+	used := 0
+	for i := m.top; i <= m.cur && i < len(m.lines); i++ {
+		used += rows(i)
+	}
+	for m.top < m.cur && used > room {
+		used -= rows(m.top)
+		m.top++
+	}
+}
+
+func (m *model) centerBlock(room int, rows func(int) int) {
+	end := m.cur
+	for end+1 < len(m.lines) && m.lines[end+1].Kind != review.Same {
+		end++
+	}
+	block := 0
+	for i := m.cur; i <= end; i++ {
+		block += rows(i)
+	}
+	above := max(room-block, 0) / 2
+	m.top = m.cur
+	for m.top > 0 && rows(m.top-1) <= above {
+		above -= rows(m.top - 1)
+		m.top--
+	}
+	filled := 0
+	for i := m.top; i < len(m.lines) && filled < room; i++ {
+		filled += rows(i)
+	}
+	for m.top > 0 && filled+rows(m.top-1) <= room {
+		filled += rows(m.top - 1)
+		m.top--
+	}
+}
+
+func (m *model) rowStarts(i, w int) []int {
+	if m.layoutW != w || len(m.layout) != len(m.lines) {
+		m.layout, m.layoutW = make([][]int, len(m.lines)), w
+	}
+	if m.layout[i] == nil {
+		m.layout[i] = rowStarts(m.code[i], codeWidth(m.lines[i], w))
+	}
+	return m.layout[i]
+}
+
+func gutter(l review.Line) (head string, fg, bg color.Color) {
+	num, mark, look, bg := l.New, " ", gray, color.Color(nil)
 	switch l.Kind {
 	case review.Add:
-		mark, look = "+", green
+		mark, look, bg = "+", green, addBg
 	case review.Del:
-		num, mark, look = l.Old, "-", red
+		num, mark, look, bg = l.Old, "-", red, delBg
 	}
 	n := "    "
 	if num > 0 {
 		n = fmt.Sprintf("%4d", num)
 	}
-	text := ansi.Truncate(n+" "+mark+" "+textclean.Clean(l.Text), w-1, "…")
-	if atCursor {
-		return orange.Render("▌") + cursor.Inherit(look).Render(text+strings.Repeat(" ", max(w-1-ansi.StringWidth(text), 0)))
+	return n + " " + mark + " ", look.GetForeground(), bg
+}
+
+func codeWidth(l review.Line, w int) int {
+	head, _, _ := gutter(l)
+	return max(w-1-ansi.StringWidth(head), 1)
+}
+
+func rowStarts(code []span, width int) []int {
+	var pos []int
+	var space []bool
+	at := 0
+	for _, s := range code {
+		g := graphemes.FromString(s.text)
+		for g.Next() {
+			pos = append(pos, at)
+			space = append(space, g.Value() == " ")
+			at += ansi.StringWidth(g.Value())
+		}
 	}
-	return " " + look.Render(text)
+	pos = append(pos, at)
+	starts := []int{0}
+	row, gap := 0, -1
+	for i := range space {
+		for pos[i+1]-pos[row] > width && i > row {
+			cut := i
+			if gap > row {
+				cut = gap
+			}
+			starts = append(starts, pos[cut])
+			row, gap = cut, -1
+		}
+		if space[i] {
+			gap = i + 1
+		}
+	}
+	return starts
+}
+
+func cutSpans(code []span, lo, hi int) []span {
+	var out []span
+	at := 0
+	for _, s := range code {
+		sw := ansi.StringWidth(s.text)
+		if a, z := max(lo, at), min(hi, at+sw); a < z {
+			out = append(out, span{text: ansi.Cut(s.text, a-at, z-at), fg: s.fg})
+		}
+		at += sw
+	}
+	return out
+}
+
+func (m *model) codeRows(i, w, limit int) []string {
+	l, code := m.lines[i], m.code[i]
+	head, fg, bg := gutter(l)
+	bar := " "
+	if i == m.cur {
+		bar = orange.Render("▌")
+		bg = cursorBg[l.Kind]
+	}
+	width := codeWidth(l, w)
+	blank := strings.Repeat(" ", ansi.StringWidth(head))
+	starts := m.rowStarts(i, w)
+	out := make([]string, 0, min(len(starts), limit))
+	for r, lo := range starts[:min(len(starts), limit)] {
+		hi := math.MaxInt
+		if r+1 < len(starts) {
+			hi = starts[r+1]
+		}
+		g := blank
+		if r == 0 {
+			g = head
+		}
+		var b strings.Builder
+		b.WriteString(bar)
+		b.WriteString(paint(fg, bg).Render(g))
+		used := 0
+		for _, s := range cutSpans(code, lo, hi) {
+			used += ansi.StringWidth(s.text)
+			b.WriteString(paint(s.fg, bg).Render(s.text))
+		}
+		b.WriteString(paint(nil, bg).Render(strings.Repeat(" ", max(width-used, 0))))
+		out = append(out, b.String())
+	}
+	return out
+}
+
+func paint(fg, bg color.Color) lipgloss.Style {
+	st := lipgloss.NewStyle().Foreground(white.GetForeground())
+	if fg != nil {
+		st = st.Foreground(fg)
+	}
+	if bg != nil {
+		st = st.Background(bg)
+	}
+	return st
 }

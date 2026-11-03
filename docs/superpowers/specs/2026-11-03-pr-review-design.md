@@ -39,11 +39,11 @@ The review moves into deckhand. A review Claude explains each file in one or two
 1. In the list, select a session and press `v`.
 2. If the session has one PR, the review starts on it. If it has more, a picker lists them (number and title).
 3. Deckhand starts a review Claude in the session's folder, on the session's account, and adds a row "review #N" to the Active list. The row behaves like other session rows: enter opens it, `s` suspends it, `q`/`Q` work as usual.
-4. One review covers all the PRs of the session: one row and one review Claude. `J`/`K` change the PR the diff shows, and the row label follows (`review #N`). Notes are kept per PR.
+4. One review covers all the PRs of the session and the rest of their stacks: one row and one review Claude. `J`/`K` change the PR the diff shows, and the row label follows (`review #N`). Notes are kept per PR.
 
 ### Calls made by Claude, not by Bent
 
-- `v` works on Live and Stale rows in Active that have PRs. The picker and the `J`/`K` cycle list open and draft PRs only, the same set `visiblePRs` shows.
+- `v` works on Live and Stale rows in Active that have PRs. The picker and the `J`/`K` cycle start from the open and draft PRs that `visiblePRs` shows. `gh pr list` then adds the open PRs in the same stacks, in merge order. A link through the default branch or from a fork does not count.
 - The review folder is the session's current folder. If that folder is not a git checkout of the PR's repo, `v` shows an error in the hint line and starts nothing.
 - A second `v` on a session that already has a review opens that review on the selected PR.
 - A review row takes a 1 to 9 number like any session. State stores the review marker (session it came from, folder, PR list, current PR), so suspend, resume and a `ui` restart bring the row back as a review with its diff pane, not as a plain session.
@@ -66,7 +66,7 @@ Layout A from the mockup, with a file column:
 
 - The session list stays on the left as it is today.
 - The file column shows the PR number and the groups. Each file shows `+added -removed`.
-- The diff pane shows the full new file. Added lines are green, deleted lines show in red at the place they were removed.
+- The diff pane shows the full new file. Code has syntax colors. Added lines have a green background, and deleted lines have a red background at the place they were removed. Long lines wrap at spaces.
 - The review Claude sits under the diff, about one third of the height.
 
 ### Keys in the diff pane
@@ -79,7 +79,7 @@ Layout A from the mockup, with a file column:
 | `c` | Open a comment box on the cursor line |
 | `enter` (in the box) | Send the comment |
 | `esc` (in the box) | Close the box, send nothing |
-| `J` / `K` | Next / previous PR of the same session |
+| `J` / `K` | Next / previous PR in merge order |
 
 ### Comments
 

@@ -1,11 +1,13 @@
 package review
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 )
 
@@ -52,6 +54,9 @@ func Load(home, id string) (State, bool, error) {
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
 		return State{}, false, err
+	}
+	if pr, ok := s.PR(); ok {
+		s.SortAndSelect(pr.URL)
 	}
 	return s, true, nil
 }
@@ -136,4 +141,64 @@ func LoadNotes(path string) ([]Note, error) {
 		return nil, err
 	}
 	return v.Files, nil
+}
+
+func parentOf(child, parent PR) bool {
+	return parent.URL != child.URL && parent.Repo == child.Repo && parent.Head != "" && parent.Head == child.Base
+}
+
+func Stack(seed, open []PR, trunk string) []PR {
+	out := slices.Clone(seed)
+	linked := func(p PR) bool {
+		return slices.ContainsFunc(out, func(q PR) bool {
+			return (parentOf(p, q) && p.Base != trunk) || (parentOf(q, p) && q.Base != trunk)
+		})
+	}
+	for grew := true; grew; {
+		grew = false
+		for _, p := range open {
+			if !slices.ContainsFunc(out, func(q PR) bool { return q.URL == p.URL }) && linked(p) {
+				out = append(out, p)
+				grew = true
+			}
+		}
+	}
+	return out
+}
+
+func MergeOrder(prs []PR) []PR {
+	sorted := slices.SortedFunc(slices.Values(prs), func(a, b PR) int { return cmp.Compare(a.Number, b.Number) })
+	parent := make([]int, len(sorted))
+	for i, p := range sorted {
+		parent[i] = slices.IndexFunc(sorted, func(q PR) bool { return parentOf(p, q) })
+	}
+	out := make([]PR, 0, len(sorted))
+	done := make([]bool, len(sorted))
+	var add func(i int)
+	add = func(i int) {
+		if done[i] {
+			return
+		}
+		done[i] = true
+		out = append(out, sorted[i])
+		for j := range sorted {
+			if parent[j] == i {
+				add(j)
+			}
+		}
+	}
+	for i := range sorted {
+		if parent[i] < 0 {
+			add(i)
+		}
+	}
+	for i := range sorted {
+		add(i)
+	}
+	return out
+}
+
+func (s *State) SortAndSelect(url string) {
+	s.PRs = MergeOrder(s.PRs)
+	s.Current = max(slices.IndexFunc(s.PRs, func(p PR) bool { return p.URL == url }), 0)
 }

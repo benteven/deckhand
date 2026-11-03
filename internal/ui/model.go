@@ -253,6 +253,7 @@ type model struct {
 	reviews  map[string]review.State
 
 	startingReview map[string]bool
+	findingPRs     map[string]bool
 	prInfos        map[string]gh.PR
 	takeover       *takeoverDialog
 	quit           *quitDialog
@@ -443,6 +444,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 	case reviewFailedMsg:
 		m.reviewFailed(msg)
+	case stackMsg:
+		return m, m.gotStack(msg)
 	case prInfoMsg:
 		m.gotPRInfo(msg)
 	case stopFailedMsg:

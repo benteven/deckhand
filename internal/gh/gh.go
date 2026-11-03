@@ -24,20 +24,12 @@ func State(url string) (state, checks string, err error) {
 	if !strings.HasPrefix(url, "https://") {
 		return "", "", fmt.Errorf("not a PR url: %q", url)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", url, "--json", "state,isDraft,statusCheckRollup")
-	cmd.WaitDelay = 3 * time.Second
-	out, err := cmd.Output()
-	if err != nil {
-		return "", "", err
-	}
 	var v struct {
 		State   string  `json:"state"`
 		IsDraft bool    `json:"isDraft"`
 		Checks  []check `json:"statusCheckRollup"`
 	}
-	if err := json.Unmarshal(out, &v); err != nil {
+	if err := ghJSON(&v, "pr", "view", url, "--json", "state,isDraft,statusCheckRollup"); err != nil {
 		return "", "", err
 	}
 	switch {
@@ -55,30 +47,54 @@ func State(url string) (state, checks string, err error) {
 
 type PR struct {
 	Number int    `json:"number"`
+	URL    string `json:"url"`
 	Title  string `json:"title"`
 	Base   string `json:"baseRefName"`
 	Head   string `json:"headRefName"`
+	Fork   bool   `json:"isCrossRepository"`
 }
+
+const prFields = "number,url,title,baseRefName,headRefName,isCrossRepository"
 
 func Info(url string) (PR, error) {
 	if !strings.HasPrefix(url, "https://") {
 		return PR{}, fmt.Errorf("not a PR url: %q", url)
 	}
+	var v PR
+	err := ghJSON(&v, "pr", "view", url, "--json", prFields)
+	return v, err
+}
+
+func OpenPRs(repo string) ([]PR, error) {
+	var v []PR
+	err := ghJSON(&v, "pr", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", prFields)
+	return v, err
+}
+
+func DefaultBranch(repo string) (string, error) {
+	var v struct {
+		Ref struct {
+			Name string `json:"name"`
+		} `json:"defaultBranchRef"`
+	}
+	err := ghJSON(&v, "repo", "view", repo, "--json", "defaultBranchRef")
+	return v.Ref.Name, err
+}
+
+func ghJSON(v any, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", url, "--json", "number,title,baseRefName,headRefName")
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.WaitDelay = 3 * time.Second
 	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-		return PR{}, errors.New(strings.TrimSpace(string(exit.Stderr)))
+		return errors.New(strings.TrimSpace(string(exit.Stderr)))
 	}
 	if err != nil {
-		return PR{}, err
+		return err
 	}
-	var v PR
-	err = json.Unmarshal(out, &v)
-	return v, err
+	return json.Unmarshal(out, v)
 }
 
 func rollup(checks []check) string {
