@@ -18,6 +18,7 @@ import (
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/live"
+	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/textclean"
 	"github.com/benteven/deckhand/internal/transcript"
@@ -382,11 +383,12 @@ func (m *model) deleteKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) trash(r deck.Row) tea.Cmd {
-	eventsDir := filepath.Join(m.home, "events")
+	eventsDir, home := filepath.Join(m.home, "events"), m.home
 	return func() tea.Msg {
 		if err := deck.TrashSession(r.SessionID, r.TranscriptPath); err != nil {
 			return errMsg{err}
 		}
+		os.RemoveAll(review.Dir(home, r.SessionID))
 		return trashedMsg{id: r.SessionID, err: events.Remove(eventsDir, r.SessionID)}
 	}
 }

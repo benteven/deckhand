@@ -22,6 +22,7 @@ import (
 	"github.com/benteven/deckhand/internal/gh"
 	"github.com/benteven/deckhand/internal/live"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
@@ -140,6 +141,7 @@ type refreshMsg struct {
 	geo       geometry
 	geoOK     bool
 	accounts  []accounts.Account
+	reviews   map[string]review.State
 	err       error
 }
 
@@ -156,6 +158,7 @@ type position struct {
 type startedMsg struct {
 	id, cwd, name, pane string
 	err                 error
+	rev                 *review.State
 }
 
 type errMsg struct{ err error }
@@ -177,6 +180,7 @@ type slotWant struct {
 	pane    string
 	target  string
 	preview bool
+	review  string
 }
 
 type prSaver struct {
@@ -245,13 +249,18 @@ type model struct {
 	picker   *picker
 	rename   *renameDialog
 	arts     *artifactList
-	takeover *takeoverDialog
-	quit     *quitDialog
-	del      *deleteDialog
-	restart  *restartDialog
-	handoff  *handoffDialog
-	help     *helpScreen
-	accounts *accountDialog
+	prPick   *prPicker
+	reviews  map[string]review.State
+
+	startingReview map[string]bool
+	prInfos        map[string]gh.PR
+	takeover       *takeoverDialog
+	quit           *quitDialog
+	del            *deleteDialog
+	restart        *restartDialog
+	handoff        *handoffDialog
+	help           *helpScreen
+	accounts       *accountDialog
 
 	switches      map[string]bool
 	continueAfter map[string]bool
@@ -432,6 +441,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case errMsg:
 		m.err = msg.err
+	case reviewFailedMsg:
+		m.reviewFailed(msg)
+	case prInfoMsg:
+		m.gotPRInfo(msg)
 	case stopFailedMsg:
 		m.err = msg.err
 		delete(m.ending, msg.entry.SessionID)
@@ -490,6 +503,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.arts != nil {
 			return m, m.artifactsKey(msg)
+		}
+		if m.prPick != nil {
+			return m, m.prPickKey(msg)
 		}
 		if m.searching {
 			return m, m.searchKey(msg)
@@ -603,6 +619,11 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			return m.openArtifacts(r)
 		}
 		return nil
+	case "v":
+		if r, ok := m.current(); ok {
+			return m.openReview(r)
+		}
+		return nil
 	case "q":
 		text := fmt.Sprintf("deckhand closed, %s still running", sessionCount(len(m.liveRows())))
 		return m.tmux("detach-client", "-E", "echo "+tmux.ShellQuote(text))
@@ -637,7 +658,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) dialogOpen() bool {
-	return m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
+	return m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
 }
 
 func (m *model) liveRows() []deck.Row {
@@ -964,6 +985,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		}
 		return m.zoom(false)
 	}
+	if msg.rev != nil {
+		m.reviewStarted(msg.id, *msg.rev)
+	}
 	m.setMode(modeActive)
 	entry := store.ActiveEntry{SessionID: msg.id, Cwd: msg.cwd, Name: msg.name, LastInteraction: time.Now()}
 	if i := slices.IndexFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == msg.id }); i >= 0 {
@@ -1117,6 +1141,7 @@ func (m *model) refresh() tea.Cmd {
 			msg.agents = runningAgents(ids, msg.events, msg.live, msg.files)
 		}
 		msg.accounts = accounts.List(home, claudeHome)
+		msg.reviews = review.LoadAll(home)
 		if save {
 			reader.Save()
 		}
@@ -1240,7 +1265,7 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 	followed := m.followClear(msg)
 	m.in.Panes = map[string]string{}
 	m.paneAccount = map[string]string{}
-	slotPane := ""
+	slotPane, slotReview := "", ""
 	loginDead, loginGone := false, m.loginPane != ""
 	for _, p := range msg.panes {
 		m.paneAccount[p.ID] = p.Account
@@ -1252,10 +1277,16 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 		}
 		if p.Target == strings.TrimPrefix(tmux.Slot, "=") {
 			slotPane = p.ID
+			if p.Role == tmux.ReviewRole {
+				slotReview = p.Review
+			}
 		}
 		if !p.Dead && p.SessionID != "" && !m.resuming[p.SessionID] {
 			m.in.Panes[p.SessionID] = p.ID
 		}
+	}
+	if slotReview != "" {
+		slotPane = m.in.Panes[slotReview]
 	}
 	liveIDs := map[string]bool{}
 	for _, l := range msg.live {
@@ -1274,7 +1305,7 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 	m.folders = msg.folders
 	m.accountList = msg.accounts
 
-	var cmds []tea.Cmd
+	cmds := m.syncReviews(msg.panes, msg.reviews)
 	cmds = append(cmds, followed, m.endDead(msg.panes, slotPane), m.endLogin(loginDead, loginGone))
 	if m.syncCwds() {
 		cmds = append(cmds, m.saveState())
@@ -1297,7 +1328,7 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 			cmds = append(cmds, m.showSelected())
 		}
 	}
-	if m.dialogOpen() && m.rename == nil && m.arts == nil {
+	if m.dialogOpen() && m.rename == nil && m.arts == nil && m.prPick == nil {
 		cmds = append(cmds, m.zoom(true))
 	}
 	if r, ok := m.current(); m.agent != "" && (!ok || m.agentIndex(r) < 0) {
@@ -1312,6 +1343,7 @@ func (m *model) rebuild() (moved bool) {
 	before := m.selected
 	m.in.State = m.state
 	m.active, m.suspended = deck.Build(m.in)
+	m.labelReviews()
 	if d := m.rename; d != nil {
 		keepOrder(m.active, d.order)
 		keepOrder(m.suspended, d.order)
@@ -1329,6 +1361,9 @@ func (m *model) rebuild() (moved bool) {
 	}
 	if a := m.arts; a != nil && !slices.ContainsFunc(m.shown(), func(r deck.Row) bool { return r.SessionID == a.id }) {
 		m.arts = nil
+	}
+	if p := m.prPick; p != nil && !slices.ContainsFunc(m.shown(), func(r deck.Row) bool { return r.SessionID == p.id }) {
+		m.prPick = nil
 	}
 	return m.selected != before
 }
@@ -1391,7 +1426,7 @@ func (m *model) show(pane, target string, preview bool) tea.Cmd {
 	m.slot = pane
 	w := m.want
 	w.mu.Lock()
-	w.pane, w.target, w.preview = pane, target, preview
+	w.pane, w.target, w.preview, w.review = pane, target, preview, m.reviewOfPane(pane)
 	w.mu.Unlock()
 	ops, file := m.ops, filepath.Join(m.home, "preview-target")
 	return func() tea.Msg {
@@ -1405,7 +1440,17 @@ func (m *model) show(pane, target string, preview bool) tea.Cmd {
 		if w.pane == "" {
 			return nil
 		}
-		if err := ops.Show(w.pane); err != nil {
+		var err error
+		if w.review != "" {
+			exe, xerr := os.Executable()
+			if xerr != nil {
+				return errMsg{xerr}
+			}
+			err = ops.ShowReview(exe, w.review, w.pane)
+		} else {
+			err = ops.Show(w.pane)
+		}
+		if err != nil {
 			return errMsg{err}
 		}
 		return nil
@@ -1482,10 +1527,14 @@ func (m *model) start(cwd, account string) tea.Cmd {
 
 func (m *model) resume(r deck.Row) tea.Cmd {
 	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
-	name := m.state.Names[r.SessionID]
+	name, home := m.state.Names[r.SessionID], m.home
 	return func() tea.Msg {
+		var rev *review.State
+		if st, ok, _ := review.Load(home, r.SessionID); ok {
+			rev = &st
+		}
 		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "")
-		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err}
+		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
 	}
 }
 

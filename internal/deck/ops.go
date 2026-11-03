@@ -12,6 +12,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
@@ -49,6 +50,9 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 	}
 	args = append(args, "--settings", o.HooksPath)
 	args = append(args, o.Cfg.ClaudeArgs...)
+	if _, ok, _ := review.Load(o.Home, sessionID); ok {
+		args = append(args, "--add-dir="+review.Dir(o.Home, sessionID))
+	}
 	if prompt != "" {
 		args = append(args, prompt)
 	}
@@ -121,7 +125,86 @@ func RemoveAccount(deckHome, name string) error {
 	return Trash(dir)
 }
 
+const reviewSize = "66%"
+
+func (o Ops) ShowReview(exe, id, claudePane string) error {
+	panes, err := o.T.Panes()
+	if err != nil {
+		return err
+	}
+	reviewPane := ""
+	for _, p := range panes {
+		if p.Role != tmux.ReviewRole || p.Review != id {
+			continue
+		}
+		if p.Dead {
+			o.T.Run("kill-pane", "-t", p.ID)
+			continue
+		}
+		reviewPane = p.ID
+	}
+	if reviewPane == "" {
+		return o.startReview(exe, id, claudePane)
+	}
+	current, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(current) == reviewPane {
+		return nil
+	}
+	if err := o.Show(claudePane); err != nil {
+		return err
+	}
+	_, err = o.T.Run("join-pane", "-d", "-v", "-b", "-l", reviewSize, "-s", reviewPane, "-t", tmux.Slot)
+	return err
+}
+
+func (o Ops) startReview(exe, id, claudePane string) error {
+	if err := o.Show(claudePane); err != nil {
+		return err
+	}
+	paneID, err := o.T.Run("split-window", "-d", "-v", "-b", "-l", reviewSize, "-P", "-F", "#{pane_id}", "-t", tmux.Slot, tmux.ReviewCommand(exe, id))
+	if err != nil {
+		return err
+	}
+	paneID = strings.TrimSpace(paneID)
+	if _, err := o.T.Run("set-option", "-p", "-t", paneID, "@deck-role", tmux.ReviewRole, ";", "set-option", "-p", "-t", paneID, tmux.ReviewOption, id); err != nil {
+		o.T.Run("kill-pane", "-t", paneID)
+		return err
+	}
+	return nil
+}
+
+func (o Ops) mainPanes() ([]string, error) {
+	out, err := o.T.Run("list-panes", "-t", tmux.DeckSession+":main", "-F", "#{pane_id}\t#{@deck-role}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func (o Ops) parkReviews() error {
+	lines, err := o.mainPanes()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		id, role, _ := strings.Cut(line, "\t")
+		if role != tmux.ReviewRole {
+			continue
+		}
+		if _, err := o.T.Run("break-pane", "-d", "-s", id, "-t", tmux.BgSession+":"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (o Ops) Show(paneID string) error {
+	if err := o.parkReviews(); err != nil {
+		return err
+	}
 	current, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
 	if err != nil {
 		return err
@@ -145,12 +228,14 @@ func (o Ops) Stop(paneID string, busy bool) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	slot, err := o.T.Run("display-message", "-p", "-t", tmux.Slot, "#{pane_id}")
+	lines, err := o.mainPanes()
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(slot) == paneID {
-		return fmt.Errorf("pane %s is still in the slot", paneID)
+	for _, line := range lines {
+		if id, _, _ := strings.Cut(line, "\t"); id == paneID {
+			return fmt.Errorf("pane %s is still in the slot", paneID)
+		}
 	}
 	out, err := o.T.Run("display-message", "-p", "-t", paneID, "#{pane_dead} #{pane_pid}")
 	if err != nil {

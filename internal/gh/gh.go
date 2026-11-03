@@ -3,6 +3,7 @@ package gh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -50,6 +51,34 @@ func State(url string) (state, checks string, err error) {
 		return "closed", "", nil
 	}
 	return "", "", fmt.Errorf("unknown PR state %q", v.State)
+}
+
+type PR struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Base   string `json:"baseRefName"`
+	Head   string `json:"headRefName"`
+}
+
+func Info(url string) (PR, error) {
+	if !strings.HasPrefix(url, "https://") {
+		return PR{}, fmt.Errorf("not a PR url: %q", url)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", url, "--json", "number,title,baseRefName,headRefName")
+	cmd.WaitDelay = 3 * time.Second
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		return PR{}, errors.New(strings.TrimSpace(string(exit.Stderr)))
+	}
+	if err != nil {
+		return PR{}, err
+	}
+	var v PR
+	err = json.Unmarshal(out, &v)
+	return v, err
 }
 
 func rollup(checks []check) string {

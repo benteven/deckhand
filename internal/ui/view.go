@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/style"
 	"github.com/benteven/deckhand/internal/textclean"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/update"
@@ -23,16 +24,16 @@ const (
 )
 
 var (
-	white  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-	gray   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7c8291"))
-	dim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#3a3f4b"))
-	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97757"))
-	yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("#e5b85c"))
-	green  = lipgloss.NewStyle().Foreground(lipgloss.Color("#8cc97a"))
-	red    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75"))
-	blue   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fb3ff"))
-	purple = lipgloss.NewStyle().Foreground(lipgloss.Color("#b39ddb"))
-	rule   = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	white  = style.White
+	gray   = style.Gray
+	dim    = style.Dim
+	orange = style.Orange
+	yellow = style.Yellow
+	green  = style.Green
+	red    = style.Red
+	blue   = style.Blue
+	purple = style.Purple
+	rule   = style.Rule
 
 	numColors = []string{"#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9", "#4dabf7", "#9775fa", "#f783ac", "#e9ecef"}
 )
@@ -132,6 +133,9 @@ func (m *model) layout(w, h int) (blocks [][]string, hint string, room int) {
 		}
 		if m.arts != nil && r.SessionID == m.arts.id {
 			blocks[len(blocks)-1] = append(blocks[len(blocks)-1], m.artifactLines(r, w)...)
+		}
+		if m.prPick != nil && r.SessionID == m.prPick.id {
+			blocks[len(blocks)-1] = append(blocks[len(blocks)-1], m.prPickLines(w)...)
 		}
 	}
 	hint = m.hintLine(w)
@@ -268,10 +272,7 @@ func page(body []string, hint string, h int) string {
 }
 
 func selectionBar(selected bool) string {
-	if !selected {
-		return "  "
-	}
-	return orange.Render("▌") + " "
+	return style.SelectionBar(selected)
 }
 
 func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) prStatus, account string, name lipgloss.Style) []string {
@@ -482,6 +483,9 @@ func (m *model) hintLine(w int) string {
 	if m.arts != nil {
 		return gray.Render(ansi.Truncate("↑↓ move  enter open  esc close", w, "…"))
 	}
+	if m.prPick != nil {
+		return gray.Render(ansi.Truncate("↑↓ move  enter review  esc close", w, "…"))
+	}
 	var text string
 	style := gray
 	switch {
@@ -531,6 +535,9 @@ func (m *model) listHint(w int) string {
 	}
 	if r, ok := m.current(); ok && len(visiblePRs(r.Summary.PRs, m.prState)) > 0 {
 		text = addItem(text, "o open PR", w)
+	}
+	if r, ok := m.current(); ok && len(m.reviewable(r)) > 0 {
+		text = addItem(text, "v review", w)
 	}
 	if r, ok := m.current(); ok && len(r.Summary.Artifacts) > 0 {
 		text = addItem(text, "a artifacts", w)
