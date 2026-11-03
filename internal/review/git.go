@@ -64,7 +64,7 @@ func Resolve(cwd string, pr PR) (Source, error) {
 		return Source{}, notCheckout
 	}
 	cwd = top
-	if url, err := git(cwd, "remote", "get-url", "origin"); err == nil && !strings.Contains(strings.ToLower(url), strings.ToLower(pr.Repo)) {
+	if url, err := git(cwd, "remote", "get-url", "origin"); err == nil && !sameRepo(url, pr.Repo) {
 		return Source{}, notCheckout
 	}
 	head := ref(cwd, pr.Head, true)
@@ -75,6 +75,12 @@ func Resolve(cwd string, pr PR) (Source, error) {
 	}
 	branch, _ := git(cwd, "branch", "--show-current")
 	return Source{Cwd: cwd, MergeBase: mb, Head: head, CheckedOut: branch == pr.Head}, nil
+}
+
+func sameRepo(url, repo string) bool {
+	url = strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(url), "/"), ".git")
+	repo = strings.ToLower(repo)
+	return strings.HasSuffix(url, "/"+repo) || strings.HasSuffix(url, ":"+repo)
 }
 
 func (s Source) diffArgs(args ...string) []string {
@@ -195,6 +201,10 @@ func ParseFull(unified string) []Line {
 	var lines []Line
 	old, nw, inHunk := 0, 0, false
 	for _, l := range strings.Split(strings.TrimSuffix(unified, "\n"), "\n") {
+		if strings.HasPrefix(l, "diff --git ") {
+			inHunk = false
+			continue
+		}
 		if strings.HasPrefix(l, "@@") {
 			var a, c int
 			fmt.Sscanf(strings.SplitN(l, " ", 3)[1], "-%d", &a)

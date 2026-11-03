@@ -12,6 +12,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
@@ -24,7 +25,7 @@ type Ops struct {
 	Home      string
 }
 
-func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string, extra ...string) (string, error) {
+func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string) (string, error) {
 	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("folder not found: %s", cwd)
 	}
@@ -49,7 +50,9 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 	}
 	args = append(args, "--settings", o.HooksPath)
 	args = append(args, o.Cfg.ClaudeArgs...)
-	args = append(args, extra...)
+	if _, ok, _ := review.Load(o.Home, sessionID); ok {
+		args = append(args, "--add-dir="+review.Dir(o.Home, sessionID))
+	}
 	if prompt != "" {
 		args = append(args, prompt)
 	}
@@ -122,14 +125,17 @@ func RemoveAccount(deckHome, name string) error {
 	return Trash(dir)
 }
 
-func (o Ops) StartReview(exe, id string) (string, error) {
-	paneID, err := o.T.Run("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", tmux.BgSession+":", tmux.ReviewCommand(exe, id))
+func (o Ops) StartReview(exe, id, claudePane string) error {
+	if err := o.Show(claudePane); err != nil {
+		return err
+	}
+	paneID, err := o.T.Run("split-window", "-d", "-v", "-b", "-l", "66%", "-P", "-F", "#{pane_id}", "-t", tmux.Slot, tmux.ReviewCommand(exe, id))
 	if err != nil {
-		return "", err
+		return err
 	}
 	paneID = strings.TrimSpace(paneID)
 	_, err = o.T.Run("set-option", "-p", "-t", paneID, "@deck-role", tmux.ReviewRole, ";", "set-option", "-p", "-t", paneID, tmux.ReviewOption, id)
-	return paneID, err
+	return err
 }
 
 func (o Ops) ShowReview(claudePane, reviewPane string) error {

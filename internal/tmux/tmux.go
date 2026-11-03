@@ -45,6 +45,16 @@ func (c Client) Run(args ...string) (string, error) {
 	return text, nil
 }
 
+func (c Client) RunInput(input string, args ...string) error {
+	full := append([]string{"-L", c.Socket, "-f", c.Conf}, args...)
+	cmd := exec.Command("tmux", full...)
+	cmd.Stdin = strings.NewReader(input)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func (c Client) Panes() ([]Pane, error) {
 	format := strings.Join([]string{
 		"#{pane_id}", "#{@deck-session}", "#{@deck-role}",

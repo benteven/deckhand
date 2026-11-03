@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/review"
+	"github.com/benteven/deckhand/internal/textclean"
 )
 
 var (
@@ -146,7 +147,7 @@ func (m *model) diffView(w, h int) []string {
 	}
 	out := []string{blue.Render(ansi.Truncate(title, w, "…"))}
 	if f.Note != "" {
-		wrapped := strings.Split(ansi.Wrap(f.Note, w, ""), "\n")
+		wrapped := strings.Split(ansi.Wrap(textclean.Clean(f.Note), w, ""), "\n")
 		for _, l := range wrapped[:min(2, len(wrapped))] {
 			out = append(out, purple.Render(l))
 		}
@@ -176,7 +177,7 @@ func codeLine(l review.Line, atCursor bool, w int) string {
 	if num > 0 {
 		n = fmt.Sprintf("%4d", num)
 	}
-	text := ansi.Truncate(n+" "+mark+" "+strings.ReplaceAll(l.Text, "\t", "    "), w, "…")
+	text := ansi.Truncate(n+" "+mark+" "+textclean.Clean(l.Text), w, "…")
 	if atCursor {
 		return cursor.Inherit(style).Render(text + strings.Repeat(" ", max(w-ansi.StringWidth(text), 0)))
 	}

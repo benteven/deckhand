@@ -1526,13 +1526,11 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
 	name, home := m.state.Names[r.SessionID], m.home
 	return func() tea.Msg {
-		st, isReview, _ := review.Load(home, r.SessionID)
-		var extra []string
 		var rev *review.State
-		if isReview {
-			extra, rev = []string{"--add-dir=" + review.Dir(home, r.SessionID)}, &st
+		if st, ok, _ := review.Load(home, r.SessionID); ok {
+			rev = &st
 		}
-		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "", extra...)
+		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "")
 		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
 	}
 }

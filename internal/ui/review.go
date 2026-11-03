@@ -115,6 +115,9 @@ func (m *model) reviewPR(r deck.Row, prs []transcript.PRLink, chosen transcript.
 	}
 	home := m.home
 	save := func() tea.Msg {
+		if fresh, ok, err := review.Load(home, id); err == nil && ok {
+			st = fresh
+		}
 		i := slices.IndexFunc(st.PRs, func(p review.PR) bool { return p.URL == chosen.URL })
 		if i < 0 {
 			n, title, base, head, err := gh.Info(chosen.URL)
@@ -188,7 +191,7 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 			return fail(err)
 		}
 		prompt := review.NotesPrompt(pr, src, review.NotesPath(home, id, pr.Number))
-		pane, err := ops.Start(st.Cwd, id, "", false, account, prompt, "--add-dir="+review.Dir(home, id))
+		pane, err := ops.Start(st.Cwd, id, "", false, account, prompt)
 		if err != nil {
 			return fail(err)
 		}
@@ -266,18 +269,21 @@ func showReview(ops deck.Ops, pane, id string) error {
 	}
 	reviewPane := ""
 	for _, p := range panes {
-		if p.Role == tmux.ReviewRole && p.Review == id {
-			reviewPane = p.ID
+		if p.Role != tmux.ReviewRole || p.Review != id {
+			continue
 		}
+		if p.Dead {
+			ops.T.Run("kill-pane", "-t", p.ID)
+			continue
+		}
+		reviewPane = p.ID
 	}
 	if reviewPane == "" {
 		exe, err := os.Executable()
 		if err != nil {
 			return err
 		}
-		if reviewPane, err = ops.StartReview(exe, id); err != nil {
-			return err
-		}
+		return ops.StartReview(exe, id, pane)
 	}
 	return ops.ShowReview(pane, reviewPane)
 }

@@ -354,6 +354,10 @@ func (m *model) movePR(d int) tea.Cmd {
 	m.st.Current = next
 	st, home, id := m.st, m.home, m.id
 	return func() tea.Msg {
+		if fresh, ok, err := review.Load(home, id); err == nil && ok && next < len(fresh.PRs) {
+			fresh.Current = next
+			st = fresh
+		}
 		if err := st.Save(home, id); err != nil {
 			return loadedMsg{st: st, err: err}
 		}
@@ -376,11 +380,11 @@ func (m *model) commentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter":
 		text := m.input.Value()
-		if text == "" || m.cur >= len(m.lines) || m.pending != "" {
+		f, ok := m.selected()
+		if text == "" || !ok || f.Path != m.path || m.cur >= len(m.lines) || m.pending != "" {
 			return nil
 		}
-		f, _ := m.selected()
-		m.pending = review.CommentPrompt(m.pr, m.src, f.Path, m.lines[m.cur], text)
+		m.pending = review.CommentPrompt(m.pr, m.src, m.path, m.lines[m.cur], text)
 		return m.send(m.pending, true)
 	}
 	var cmd tea.Cmd
