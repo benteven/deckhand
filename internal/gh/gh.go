@@ -52,6 +52,30 @@ func State(url string) (state, checks string, err error) {
 	return "", "", fmt.Errorf("unknown PR state %q", v.State)
 }
 
+func Info(url string) (number int, title, base, head string, err error) {
+	if !strings.HasPrefix(url, "https://") {
+		return 0, "", "", "", fmt.Errorf("not a PR url: %q", url)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", url, "--json", "number,title,baseRefName,headRefName")
+	cmd.WaitDelay = 3 * time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, "", "", "", err
+	}
+	var v struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Base   string `json:"baseRefName"`
+		Head   string `json:"headRefName"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return 0, "", "", "", err
+	}
+	return v.Number, v.Title, v.Base, v.Head, nil
+}
+
 func rollup(checks []check) string {
 	if len(checks) == 0 {
 		return ""

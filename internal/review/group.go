@@ -26,6 +26,7 @@ type File struct {
 	Path, OldPath  string
 	Added, Removed int
 	Binary         bool
+	Untracked      bool
 	Group          Group
 	Note           string
 }
