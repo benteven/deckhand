@@ -14,6 +14,7 @@ import (
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/preview"
+	"github.com/benteven/deckhand/internal/reviewui"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
@@ -37,6 +38,16 @@ func main() {
 			markBuild()
 		}
 		runPreview(os.Args[2:])
+	case "review":
+		if len(os.Args) != 3 {
+			fmt.Fprintln(os.Stderr, "usage: deckhand review <session id>")
+			os.Exit(2)
+		}
+		markBuild()
+		if err := reviewui.Run(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "hook":
 		runHook()
 	case "reload":
