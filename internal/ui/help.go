@@ -43,6 +43,7 @@ func helpSections(prefix string) []helpSection {
 			{"g", "Agent mode: step through subagents"},
 			{"t", "Take over from another terminal, or move to the next account"},
 			{"o", "Open the pull requests"},
+			{"v", "Review the pull requests: diff, notes, comments to Claude"},
 			{"a", "List the artifacts"},
 			{"d", "Move a suspended session to the Trash"},
 			{"U", "Upgrade and reload; sessions keep running"},

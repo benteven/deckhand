@@ -24,7 +24,7 @@ type Ops struct {
 	Home      string
 }
 
-func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string) (string, error) {
+func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string, extra ...string) (string, error) {
 	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("folder not found: %s", cwd)
 	}
@@ -49,6 +49,7 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 	}
 	args = append(args, "--settings", o.HooksPath)
 	args = append(args, o.Cfg.ClaudeArgs...)
+	args = append(args, extra...)
 	if prompt != "" {
 		args = append(args, prompt)
 	}
