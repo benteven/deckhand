@@ -16,6 +16,7 @@ import (
 
 const (
 	repo       = "benteven/deckhand"
+	tap        = "benteven/tap"
 	checkEvery = 6 * time.Hour
 )
 
@@ -113,6 +114,9 @@ func Install(exe, current string) (string, error) {
 		brew := filepath.Join(prefix, "bin", "brew")
 		for _, args := range [][]string{{"update", "--quiet"}, {"upgrade", "deckhand"}} {
 			if out, err := exec.Command(brew, args...).CombinedOutput(); err != nil {
+				if bytes.Contains(out, []byte("untrusted tap")) {
+					return "", fmt.Errorf("Run brew trust %s, then U", tap)
+				}
 				return "", fmt.Errorf("brew %s: %v: %s", args[0], err, lastLine(out))
 			}
 		}

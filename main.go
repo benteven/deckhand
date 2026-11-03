@@ -17,7 +17,6 @@ import (
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
-	"github.com/benteven/deckhand/internal/update"
 )
 
 var version = "dev"
@@ -45,11 +44,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-	case "upgrade":
-		if err := upgrade(); err != nil {
-			client := tmux.Client{Socket: paths.Socket(), Conf: filepath.Join(paths.DeckHome(), "tmux.conf")}
-			client.Run("display-message", "-d", "10000", "deckhand: "+err.Error())
-		}
 	case "login":
 		if err := login(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -67,17 +61,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(2)
 	}
-}
-
-func upgrade() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if exe, err = update.Install(exe, version); err != nil {
-		return err
-	}
-	return exec.Command(exe, "reload").Run()
 }
 
 func buildID() string {

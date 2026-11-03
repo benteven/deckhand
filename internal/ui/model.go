@@ -621,7 +621,17 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.hint = "Upgrading, the list reloads when done"
-		return m.tmux("run-shell", "-b", tmux.ShellQuote(exe)+" upgrade")
+		t, version := m.ops.T, m.version
+		return func() tea.Msg {
+			exe, err := update.Install(exe, version)
+			if err == nil {
+				_, err = t.Run("run-shell", "-b", tmux.ShellQuote(exe)+" reload")
+			}
+			if err != nil {
+				return errMsg{err}
+			}
+			return nil
+		}
 	}
 	return nil
 }
