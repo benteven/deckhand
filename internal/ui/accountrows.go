@@ -21,7 +21,7 @@ var accountColors = []lipgloss.Style{
 func (m *model) accountStyle(name string) lipgloss.Style {
 	k := accounts.Index(m.accountList, name)
 	if name == "" || k < 1 {
-		return white
+		return normal
 	}
 	return accountColors[(k-1)%len(accountColors)]
 }

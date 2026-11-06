@@ -26,7 +26,7 @@ type pendingHandoff struct {
 
 func (d *handoffDialog) view(w, h int) string {
 	body := []string{
-		white.Render(ansi.Truncate(`Hand off "`+d.row.Name+`"? (y/n)`, w, "…")),
+		normal.Render(ansi.Truncate(`Hand off "`+d.row.Name+`"? (y/n)`, w, "…")),
 		"",
 		gray.Render(ansi.Truncate("Claude writes its state to a file.", w, "…")),
 		gray.Render(ansi.Truncate("Then the deck runs /clear and", w, "…")),

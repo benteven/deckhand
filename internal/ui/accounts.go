@@ -91,7 +91,7 @@ func (m *model) accountsView(w, h int) string {
 	d := m.accounts
 	if d.naming {
 		body := []string{
-			white.Render(ansi.Truncate("Name for the new account:", w, "…")),
+			normal.Render(ansi.Truncate("Name for the new account:", w, "…")),
 			"",
 			ansi.Truncate(selectionBar(true)+d.input.View(), w, ""),
 			"",
@@ -101,7 +101,7 @@ func (m *model) accountsView(w, h int) string {
 	}
 	if d.removing != "" {
 		body := []string{
-			white.Render(ansi.Truncate(`Remove account "`+d.removing+`"? (y/n)`, w, "…")),
+			normal.Render(ansi.Truncate(`Remove account "`+d.removing+`"? (y/n)`, w, "…")),
 			"",
 			gray.Render(ansi.Truncate("The deck logs it out and moves its folder to the Trash.", w, "…")),
 			gray.Render(ansi.Truncate("Transcripts stay in ~/.claude.", w, "…")),
@@ -112,7 +112,7 @@ func (m *model) accountsView(w, h int) string {
 	if d.hasRow {
 		title = `Account for "` + d.row.Name + `"`
 	}
-	body := []string{white.Render(ansi.Truncate(title, w, "…")), ""}
+	body := []string{normal.Render(ansi.Truncate(title, w, "…")), ""}
 	col, now := 0, time.Now()
 	for _, a := range d.list {
 		col = max(col, ansi.StringWidth(accounts.Label(a.Name)))

@@ -72,7 +72,7 @@ func (m *model) helpLines(w int) []string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, white.Bold(true).Render(s.title))
+		lines = append(lines, normal.Bold(true).Render(s.title))
 		for _, k := range s.keys {
 			key := orange.Render(k[0]) + strings.Repeat(" ", col+2-ansi.StringWidth(k[0]))
 			lines = append(lines, ansi.Truncate("  "+key+gray.Render(k[1]), w, "…"))

@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	white  = style.White
+	normal = style.Normal
 	gray   = style.Gray
 	dim    = style.Dim
 	orange = style.Orange
@@ -344,7 +344,7 @@ func detailLines(r deck.Row, width int) []string {
 		out = append(out, gray.Render(ansi.Truncate(strings.Join(where, " · "), width, "…")))
 	}
 	if p := strings.Join(strings.Fields(textclean.Clean(r.Summary.LastPrompt)), " "); p != "" {
-		out = append(out, gray.Render("› ")+white.Render(ansi.Truncate(p, max(width-2, 1), "…")))
+		out = append(out, gray.Render("› ")+normal.Render(ansi.Truncate(p, max(width-2, 1), "…")))
 	}
 	return out
 }
@@ -355,7 +355,7 @@ func agentLines(agents []transcript.Agent, width int, colored bool) []string {
 	for _, a := range shown {
 		arrow, desc := "↳", ansi.Truncate(a.Label, max(width-4, 1), "…")
 		if colored {
-			arrow, desc = gray.Render(arrow), white.Render(desc)
+			arrow, desc = gray.Render(arrow), normal.Render(desc)
 		}
 		out = append(out, "  "+arrow+" "+desc)
 	}
@@ -583,11 +583,11 @@ func (m *model) tabLabels() (string, string) {
 
 func (m *model) tabsLine(w int) string {
 	a, s := m.tabLabels()
-	current := white.Underline(true)
+	current := normal.Underline(true)
 	if m.mode == modeSuspended {
-		a, s = white.Render(a), current.Render(s)
+		a, s = normal.Render(a), current.Render(s)
 	} else {
-		a, s = current.Render(a), white.Render(s)
+		a, s = current.Render(a), normal.Render(s)
 	}
 	return ansi.Truncate(a+"  "+s, w, "")
 }

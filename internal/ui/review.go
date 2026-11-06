@@ -220,7 +220,7 @@ func (m *model) prPickLines(w int) []string {
 	p := m.prPick
 	var lines []string
 	for i, pr := range p.prs {
-		text := white.Render(fmt.Sprintf("#%d", pr.Number))
+		text := normal.Render(fmt.Sprintf("#%d", pr.Number))
 		if t := m.prInfos[pr.URL].Title; t != "" {
 			text += " " + gray.Render(strings.Join(strings.Fields(textclean.Clean(t)), " "))
 		}
