@@ -23,8 +23,8 @@ const (
 )
 
 var (
-	gray  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	white = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	gray   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	normal = lipgloss.NewStyle()
 )
 
 func Render(entries []transcript.Entry, title, note string, width, height int) string {
@@ -54,7 +54,7 @@ func Render(entries []transcript.Entry, title, note string, width, height int) s
 		body = body[len(body)-room:]
 	}
 	lines := make([]string, 0, height)
-	lines = append(lines, white.Render(ansi.Truncate(title, width, "")))
+	lines = append(lines, normal.Render(ansi.Truncate(title, width, "")))
 	for _, l := range body {
 		lines = append(lines, gray.Render(l))
 	}

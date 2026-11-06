@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	white  = style.White
+	normal = style.Normal
 	gray   = style.Gray
 	orange = style.Orange
 	yellow = style.Yellow
@@ -91,7 +91,7 @@ func (m *model) fileColumn(w, h int) []string {
 	if !m.ready {
 		return []string{gray.Render("loading")}
 	}
-	head := white.Render(fmt.Sprintf("PR #%d", m.pr.Number)) + gray.Render("  J/K")
+	head := normal.Render(fmt.Sprintf("PR #%d", m.pr.Number)) + gray.Render("  J/K")
 	out := []string{ansi.Truncate(head, w, "…")}
 	if m.want != "" {
 		return append(out, gray.Render("loading"))
@@ -141,7 +141,7 @@ func fileLine(f review.File, selected bool, w int) string {
 	}
 	look := gray
 	if selected {
-		look = white
+		look = normal
 	}
 	return ansi.Truncate(bar+look.Render(name)+strings.Repeat(" ", max(room-ansi.StringWidth(name), 0)+1)+stats, w, "")
 }
@@ -333,7 +333,7 @@ func (m *model) codeRows(i, w, limit int) []string {
 }
 
 func paint(fg, bg color.Color) lipgloss.Style {
-	st := lipgloss.NewStyle().Foreground(white.GetForeground())
+	st := lipgloss.NewStyle()
 	if fg != nil {
 		st = st.Foreground(fg)
 	}

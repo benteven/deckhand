@@ -168,7 +168,7 @@ func (m *model) pickerKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (p *picker) view(w, h int) string {
-	body := []string{white.Render("New session"), p.input.View(), ""}
+	body := []string{normal.Render("New session"), p.input.View(), ""}
 	if len(p.accounts) > 1 {
 		body[0] += gray.Render(" on ") + orange.Render(accounts.Label(p.account)) + gray.Render(" (ctrl-a changes)")
 	}
@@ -269,7 +269,7 @@ func (d *renameDialog) hint(w int) string {
 type resumePrompt struct{ count int }
 
 func (p *resumePrompt) view(w, h int) string {
-	body := []string{white.Render(ansi.Truncate(fmt.Sprintf("Resume %s from before? (y/n)", sessionCount(p.count)), w, "…"))}
+	body := []string{normal.Render(ansi.Truncate(fmt.Sprintf("Resume %s from before? (y/n)", sessionCount(p.count)), w, "…"))}
 	return page(body, gray.Render(ansi.Truncate("y resume all  n keep them gray", w, "")), h)
 }
 
@@ -284,7 +284,7 @@ type takeoverDialog struct{ row deck.Row }
 
 func (d *takeoverDialog) view(w, h int) string {
 	body := []string{
-		white.Render(ansi.Truncate(`Take over "`+d.row.Name+`"`, w, "…")),
+		normal.Render(ansi.Truncate(`Take over "`+d.row.Name+`"`, w, "…")),
 		gray.Render(ansi.Truncate("Stop it in the other terminal and open it here? (y/n)", w, "…")),
 	}
 	if d.row.Busy {
@@ -330,7 +330,7 @@ func (m *model) tookOver(msg takenOverMsg) tea.Cmd {
 type quitDialog struct{ count int }
 
 func (d *quitDialog) view(w, h int) string {
-	body := []string{white.Render(ansi.Truncate(fmt.Sprintf("Stop %s and quit? (y/n)", sessionCount(d.count)), w, "…"))}
+	body := []string{normal.Render(ansi.Truncate(fmt.Sprintf("Stop %s and quit? (y/n)", sessionCount(d.count)), w, "…"))}
 	return page(body, gray.Render(ansi.Truncate("y stop and quit  n cancel", w, "")), h)
 }
 
@@ -356,7 +356,7 @@ type trashedMsg struct {
 
 func (d *deleteDialog) view(w, h int) string {
 	body := []string{
-		white.Render(ansi.Truncate(`Delete "`+d.row.Name+`"? (y/n)`, w, "…")),
+		normal.Render(ansi.Truncate(`Delete "`+d.row.Name+`"? (y/n)`, w, "…")),
 		gray.Render(ansi.Truncate("Moves it to the Trash.", w, "…")),
 	}
 	return page(body, gray.Render(ansi.Truncate("y delete  n cancel", w, "")), h)
@@ -431,7 +431,7 @@ type restartedMsg struct {
 }
 
 func (d *restartDialog) view(w, h int) string {
-	body := []string{white.Render(ansi.Truncate(`Restart "`+d.row.Name+`"? (y/n)`, w, "…"))}
+	body := []string{normal.Render(ansi.Truncate(`Restart "`+d.row.Name+`"? (y/n)`, w, "…"))}
 	if d.row.Busy {
 		body = append(body, "", yellow.Render(ansi.Truncate("This session is busy. Restarting stops the turn in progress.", w, "…")))
 	}

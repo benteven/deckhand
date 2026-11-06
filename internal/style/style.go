@@ -3,7 +3,7 @@ package style
 import "charm.land/lipgloss/v2"
 
 var (
-	White  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
+	Normal = lipgloss.NewStyle()
 	Gray   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7c8291"))
 	Dim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#3a3f4b"))
 	Orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97757"))
