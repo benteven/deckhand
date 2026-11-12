@@ -37,7 +37,7 @@ The deckhand binary is ` + exe + `.
 3. A project: ` + "`" + exe + " role list`" + ` shows the roles. ` + "`" + exe + " role start <role> --task <id>`" + ` starts one in the task's worktree.
 4. A task: ` + "`" + exe + " task update [--status S] [--need TEXT] [--waits-on W] [--pr URL]`" + ` changes your own task. S is todo, working, needs-you or waiting.
 5. A task: ` + "`" + exe + " task done [--summary TEXT]`" + ` when the PR is merged.
-6. A task that needs the user asks in its own reply and ends its turn. Deckhand sets the task to needs-you and tells the assistant.
+6. A task that needs the user asks in its own reply and ends its turn. Deckhand sets a working task to needs-you and tells the assistant. Before a task ends a turn to wait for a tester, a role or the project, it runs ` + "`" + exe + " task update --status waiting --waits-on <who>`" + `, and ` + "`" + exe + " task update --status working`" + ` when it goes on.
 7. A role: ` + "`" + exe + " role model fable|opus|sonnet`" + ` restarts you on that model in the same conversation.
 8. A role: ` + "`" + exe + " queue take [name]`" + ` before you start the running system, and ` + "`" + exe + " queue give [name]`" + ` when you stop it. ` + "`" + exe + " queue list`" + ` shows the turns.
 `

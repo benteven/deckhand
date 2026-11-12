@@ -31,7 +31,9 @@ Never run the tests yourself. Ask your project for a tester.
 
 When the testers pass, run the PR process of the repo. Use the review tools the repo has.
 
-Keep your line on the page current with ` + "`deckhand task update --need TEXT`" + `. Tell Bent only what needs Bent.
+Keep your line on the page current with ` + "`deckhand task update --need TEXT`" + `. Tell the user only what needs the user.
+
+Before you end a turn to wait for a tester, a role or the project, run ` + "`deckhand task update --status waiting --waits-on WHO`" + `. When you go on, run ` + "`deckhand task update --status working`" + `.
 
 When deckhand tells you the PR is merged, write the summary with ` + "`deckhand task done --summary TEXT`" + `.
 `
