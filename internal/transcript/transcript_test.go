@@ -98,3 +98,21 @@ func TestSummaryLimit(t *testing.T) {
 	s, _ = r.Summary(path)
 	assert.Zero(t, s.Limit)
 }
+
+func TestListPrefersProjectCopyOverWorktreeCopy(t *testing.T) {
+	home := t.TempDir()
+	write := func(dir string, at time.Time) string {
+		p := filepath.Join(home, "projects", dir, "s1.jsonl")
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte("{}\n"), 0o600))
+		require.NoError(t, os.Chtimes(p, at, at))
+		return p
+	}
+	now := time.Now()
+	live := write("-repo", now.Add(-time.Hour))
+	write("-repo--claude-worktrees-fix-1", now)
+	files, err := List(home)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, live, files[0].Path)
+}
