@@ -102,17 +102,29 @@ func Pending(home string) []Request {
 		mod time.Time
 	}
 	var items []item
+	now := time.Now()
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, replySuffix) || strings.HasPrefix(name, ".") {
-			continue
-		}
-		id := strings.TrimSuffix(name, ".json")
-		if _, err := os.Stat(filepath.Join(dir, id+replySuffix)); err == nil {
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
+			continue
+		}
+		old := now.Sub(info.ModTime()) > RequestTimeout
+		if strings.HasSuffix(name, replySuffix) {
+			if _, err := os.Stat(filepath.Join(dir, strings.TrimSuffix(name, replySuffix)+".json")); old && errors.Is(err, os.ErrNotExist) {
+				os.Remove(filepath.Join(dir, name))
+			}
+			continue
+		}
+		if old {
+			os.Remove(filepath.Join(dir, name))
+			continue
+		}
+		id := strings.TrimSuffix(name, ".json")
+		if _, err := os.Stat(filepath.Join(dir, id+replySuffix)); err == nil {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, name))
