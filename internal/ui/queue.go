@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/typing"
 )
+
+const queueGrace = 3 * time.Second
 
 type queueNamedMsg struct {
 	req  ctl.Request
@@ -125,17 +128,35 @@ func (m *model) dropFromQueues(id string) tea.Cmd {
 	return tea.Batch(m.saveState(), m.deliverTurns())
 }
 
-func (m *model) pruneQueues() tea.Cmd {
+func (m *model) pruneQueues(now time.Time) tea.Cmd {
+	queued := map[string]bool{}
 	var gone []string
 	for _, q := range m.state.Queues {
 		for _, id := range q {
-			if r, ok := m.rowByID(id); !m.resuming[id] && !(ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
+			queued[id] = true
+			if r, ok := m.rowByID(id); m.resuming[id] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "") {
+				delete(m.stoppedAt, id)
+				continue
+			}
+			if m.stoppedAt == nil {
+				m.stoppedAt = map[string]time.Time{}
+			}
+			since, seen := m.stoppedAt[id]
+			if !seen {
+				m.stoppedAt[id] = now
+			} else if now.Sub(since) >= queueGrace {
 				gone = append(gone, id)
 			}
 		}
 	}
+	for id := range m.stoppedAt {
+		if !queued[id] {
+			delete(m.stoppedAt, id)
+		}
+	}
 	var cmds []tea.Cmd
 	for _, id := range gone {
+		delete(m.stoppedAt, id)
 		cmds = append(cmds, m.dropFromQueues(id))
 	}
 	return tea.Batch(cmds...)
