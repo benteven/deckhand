@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
@@ -23,6 +24,13 @@ type Ops struct {
 	Cfg       store.Config
 	HooksPath string
 	Home      string
+
+	Exe                string
+	PluginDir          string
+	AssistantPluginDir string
+	AssistantDir       string
+	AssistantID        string
+	Rules              string
 }
 
 func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string) (string, error) {
@@ -30,6 +38,7 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 		return "", fmt.Errorf("folder not found: %s", cwd)
 	}
 	args := []string{paths.ClaudeCommand()}
+	envArgs := []string{"env", ctl.SessionEnv + "=" + sessionID}
 	if account != "" {
 		if !accounts.LoggedIn(o.Home, account) {
 			return "", fmt.Errorf("account %s is not logged in, press A to log in", account)
@@ -38,8 +47,9 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 		if err != nil {
 			return "", err
 		}
-		args = append([]string{"env", "CLAUDE_CONFIG_DIR=" + dir}, args...)
+		envArgs = append(envArgs, "CLAUDE_CONFIG_DIR="+dir)
 	}
+	args = append(envArgs, args...)
 	if resume {
 		args = append(args, "--resume", sessionID)
 	} else {
@@ -52,6 +62,18 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 	args = append(args, o.Cfg.ClaudeArgs...)
 	if _, ok, _ := review.Load(o.Home, sessionID); ok {
 		args = append(args, "--add-dir="+review.Dir(o.Home, sessionID))
+	}
+	if o.AssistantID != "" && sessionID == o.AssistantID {
+		args = append(args,
+			"--plugin-dir="+o.AssistantPluginDir,
+			"--append-system-prompt-file="+filepath.Join(o.AssistantDir, "instructions.md"),
+			"--allowedTools=Bash("+o.Exe+" session *),Bash("+o.Exe+" sub *)",
+		)
+	} else {
+		args = append(args, "--plugin-dir="+o.PluginDir)
+		if o.Rules != "" {
+			args = append(args, "--append-system-prompt="+o.Rules)
+		}
 	}
 	if prompt != "" {
 		args = append(args, prompt)

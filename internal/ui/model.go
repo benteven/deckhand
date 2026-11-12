@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/gh"
@@ -301,6 +302,14 @@ func Run(version string) error {
 	styles.Focused.Prompt = yellow
 	styles.Blurred.Prompt = yellow
 	search.SetStyles(styles)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	rules := ""
+	if cfg.Assistant {
+		rules = ctl.Rules()
+	}
 	m := &model{
 		search:   search,
 		index:    transcript.NewIndex(),
@@ -311,6 +320,13 @@ func Run(version string) error {
 			Cfg:       cfg,
 			HooksPath: filepath.Join(home, "hooks.json"),
 			Home:      home,
+
+			Exe:                exe,
+			PluginDir:          filepath.Join(home, "plugin"),
+			AssistantPluginDir: filepath.Join(home, "plugin-assistant"),
+			AssistantDir:       filepath.Join(home, "assistant"),
+			AssistantID:        state.Assistant.ID,
+			Rules:              rules,
 		},
 		reader:      reader,
 		home:        home,

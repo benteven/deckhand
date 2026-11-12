@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/preview"
@@ -181,6 +182,9 @@ func setup() (tmux.Client, store.Config, string, error) {
 		return tmux.Client{}, cfg, "", err
 	}
 	if err := os.WriteFile(filepath.Join(home, "hooks.json"), events.HookSettings(exe), 0o644); err != nil {
+		return tmux.Client{}, cfg, "", err
+	}
+	if err := ctl.WritePlugins(home, exe); err != nil {
 		return tmux.Client{}, cfg, "", err
 	}
 	client := tmux.Client{Socket: paths.Socket(), Conf: conf}

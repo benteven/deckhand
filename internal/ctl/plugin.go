@@ -1,0 +1,75 @@
+package ctl
+
+import (
+	"os"
+	"path/filepath"
+)
+
+const pluginJSON = `{"name":"deckhand","description":"deckhand sessions"}` + "\n"
+
+func subsessionSkill(exe string) string {
+	return `---
+name: subsession
+description: Start, list and close deckhand subsessions: full Claude sessions in their own git worktree that you can message and the user can open.
+---
+
+The deckhand binary is ` + exe + `.
+
+1. Run ` + "`ListAgents`" + ` and copy your own address from "This session is X [id]".
+2. Commit first if the subsession needs your uncommitted changes.
+3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" -- "<task>"` + "`" + `. It prints the subsession's name and worktree.
+4. Talk to it with ` + "`SendMessage`" + ` to that name. It reports back to you the same way.
+5. List: ` + "`" + exe + " sub list`" + `. Close: ` + "`" + exe + " sub close <name>`" + `. Closing asks the user about the worktree; do not remove it yourself.
+6. A subsession cannot start subsessions.
+`
+}
+
+func sessionsSkill(exe string) string {
+	return `---
+name: sessions
+description: List, search, start, resume, type into, hand off and close deckhand sessions. Only the assistant can use it.
+---
+
+The deckhand binary is ` + exe + `.
+
+1. ` + "`" + exe + " session list`" + `: JSON lines with id, name, folder, state, need, message.
+2. ` + "`" + exe + " session search <words>`" + `: suspended sessions that match, newest first.
+3. ` + "`" + exe + " session start --folder F --name N [--account A] -- PROMPT`" + `.
+4. ` + "`" + exe + " session resume <id>`" + `.
+5. ` + "`" + exe + " session send <id> -- TEXT`" + `: types as the user. Refused while the session shows a menu; bring the menu to the user instead.
+6. ` + "`" + exe + " session handoff <id>`" + ` and ` + "`" + exe + " session close <id>`" + `.
+`
+}
+
+func writePlugin(dir string, skills map[string]string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	meta := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(meta, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(meta, "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+		return err
+	}
+	for name, text := range skills {
+		skillDir := filepath.Join(dir, "skills", name)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func WritePlugins(home, exe string) error {
+	if err := writePlugin(filepath.Join(home, "plugin"), map[string]string{"subsession": subsessionSkill(exe)}); err != nil {
+		return err
+	}
+	return writePlugin(filepath.Join(home, "plugin-assistant"), map[string]string{
+		"subsession": subsessionSkill(exe),
+		"sessions":   sessionsSkill(exe),
+	})
+}
