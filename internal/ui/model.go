@@ -165,6 +165,7 @@ type startedMsg struct {
 	rev                 *review.State
 	req, out            string
 	background          bool
+	taskStart           bool
 }
 
 type errMsg struct{ err error }
@@ -1164,7 +1165,7 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.err != nil {
 		if msg.req != "" {
 			reply := m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
-			if i, ok := m.taskOf(msg.id); ok {
+			if i, ok := m.taskOf(msg.id); ok && msg.taskStart {
 				m.tasks[i].Session, m.tasks[i].Status = "", "todo"
 				return tea.Batch(m.saveTasks(), reply)
 			}

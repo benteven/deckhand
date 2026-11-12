@@ -394,7 +394,12 @@ func (m *model) taskCreated(msg taskCreatedMsg) tea.Cmd {
 	t.Log(time.Now(), fmt.Sprintf("started on %s with %s", msg.branch, msg.model))
 	launch := deck.Launch{Cwd: msg.dir, SessionID: msg.id, Name: msg.name, Account: m.state.AccountFor(project), Prompt: taskPrompt(*t), ForkOf: project, ForkCwd: msg.cwd}
 	out := fmt.Sprintf("started task %s as %s in %s on branch %s", t.ID, msg.name, msg.dir, msg.branch)
-	return tea.Batch(m.saveState(), m.saveTasks(), forRequest(m.launch(launch), req.ID, out))
+	start := forRequest(m.launch(launch), req.ID, out)
+	return tea.Batch(m.saveState(), m.saveTasks(), func() tea.Msg {
+		msg, _ := start().(startedMsg)
+		msg.taskStart = true
+		return msg
+	})
 }
 
 func taskPrompt(t tasks.Task) string {
