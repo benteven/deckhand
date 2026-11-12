@@ -215,6 +215,9 @@ func (m *model) pageTarget(a web.Action) (string, error) {
 		if a.Session == "" {
 			return "", errors.New("give a task or a session")
 		}
+		if !slices.ContainsFunc(m.waitingSessions(), func(s web.SessionView) bool { return s.ID == a.Session }) {
+			return "", errors.New("the session does not wait for you")
+		}
 		return a.Session, nil
 	}
 	i := slices.IndexFunc(m.tasks, func(t tasks.Task) bool { return t.ID == a.Task })
@@ -229,6 +232,10 @@ func (m *model) pageTarget(a web.Action) (string, error) {
 
 func (m *model) userIn(r deck.Row) bool {
 	return m.slot == r.PaneID && !m.focused
+}
+
+func (m *model) typeReady(r deck.Row) bool {
+	return r.Kind == deck.Live && !m.resuming[r.SessionID] && m.handoffs[r.PaneID] == nil && m.userAway(r) && m.canType(r)
 }
 
 func (m *model) pageAnswer(a web.Action) tea.Cmd {
@@ -246,7 +253,7 @@ func (m *model) pageAnswer(a web.Action) tea.Cmd {
 	if !ok || r.Kind != deck.Live {
 		return replyTo(a, errors.New("the session is not running"))
 	}
-	if m.userIn(r) || m.typing[r.PaneID] {
+	if !m.typeReady(r) {
 		m.pageAnswers = append(m.pageAnswers, pageAnswer{id: id, text: a.Text})
 		return replyTo(a, nil)
 	}
@@ -270,7 +277,7 @@ func (m *model) deliverAnswers() tea.Cmd {
 			m.err = fmt.Errorf("%s stopped before the page answer was typed", m.sessionName(p.id))
 			continue
 		}
-		if m.userIn(r) || m.typing[r.PaneID] || m.in.Events[p.id].Menu() || r.Asking {
+		if !m.typeReady(r) {
 			m.pageAnswers = append(m.pageAnswers, p)
 			continue
 		}
@@ -301,6 +308,9 @@ func (m *model) pageChoice(a web.Action) tea.Cmd {
 	}
 	if !m.in.Events[id].Menu() && !r.Asking {
 		return replyTo(a, errors.New("the session shows no menu"))
+	}
+	if m.userIn(r) || m.typing[r.PaneID] {
+		return replyTo(a, errors.New("the session is in use in deckhand; try again soon"))
 	}
 	t, pane, n := m.ops.T, r.PaneID, a.Choice
 	return func() tea.Msg {

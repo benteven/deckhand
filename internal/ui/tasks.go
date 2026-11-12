@@ -586,7 +586,7 @@ func (m *model) askSummaries() tea.Cmd {
 			continue
 		}
 		r, ok := m.rowByID(t.Session)
-		if !ok || r.Kind != deck.Live || m.resuming[t.Session] || m.handoffs[r.PaneID] != nil || !m.userAway(r) || !m.canType(r) {
+		if !ok || !m.typeReady(r) {
 			continue
 		}
 		if m.asking == nil {
@@ -655,7 +655,7 @@ func (m *model) deliverProjectNotes() tea.Cmd {
 	var cmds []tea.Cmd
 	for id, notes := range m.projectNotes {
 		r, ok := m.rowByID(id)
-		if !ok || r.Kind != deck.Live || m.resuming[id] || m.handoffs[r.PaneID] != nil || !m.userAway(r) || !m.canType(r) {
+		if !ok || !m.typeReady(r) {
 			continue
 		}
 		delete(m.projectNotes, id)

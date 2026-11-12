@@ -170,7 +170,7 @@ func (m *model) deliverTurns() tea.Cmd {
 			continue
 		}
 		r, ok := m.rowByID(id)
-		if !ok || r.Kind != deck.Live || m.resuming[id] || m.handoffs[r.PaneID] != nil || !m.userAway(r) || !m.canType(r) {
+		if !ok || !m.typeReady(r) {
 			continue
 		}
 		delete(m.turns, id)
