@@ -502,6 +502,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Text == tmux.NextKey || msg.Text == tmux.PrevKey {
 			return m, m.switchLive(msg.Text == tmux.NextKey)
 		}
+		if msg.Text == tmux.FamilyKey {
+			return m, m.switchFamily()
+		}
 		if msg.Text == tmux.LastKey || msg.Text == tmux.BackKey {
 			return m, m.toggleLast(msg.Text == tmux.BackKey)
 		}
@@ -744,6 +747,22 @@ func (m *model) switchLive(next bool) tea.Cmd {
 		i = len(rows) - 1
 	}
 	return m.switchTo(rows[i])
+}
+
+func (m *model) switchFamily() tea.Cmd {
+	if m.quitting || m.dialogOpen() {
+		return nil
+	}
+	id := m.selected
+	if i := slices.IndexFunc(m.active, func(r deck.Row) bool { return r.PaneID == m.slot && m.slot != "" }); i >= 0 {
+		id = m.active[i].SessionID
+	}
+	family := slices.DeleteFunc(deck.Family(m.active, id), func(r deck.Row) bool { return r.Kind != deck.Live })
+	if len(family) < 2 {
+		return nil
+	}
+	i := slices.IndexFunc(family, func(r deck.Row) bool { return r.SessionID == id })
+	return m.switchTo(family[(i+1)%len(family)])
 }
 
 func (m *model) jump(n int) tea.Cmd {

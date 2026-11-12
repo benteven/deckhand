@@ -20,6 +20,7 @@ const (
 	PrevKey      = "\ue001"
 	LastKey      = "\ue002"
 	BackKey      = "\ue003"
+	FamilyKey    = "\ue004"
 	ReviewRole   = "review"
 	ReviewOption = "@deck-review"
 )
@@ -193,7 +194,8 @@ func ShellQuote(s string) string {
 const listFocused = "#{&&:#{==:#{session_name},deck},#{==:#{pane_index},0}}"
 
 func switchKey(key, code string) string {
-	return fmt.Sprintf(`bind -n %s if -F "%s" "if -F '#{@deck-dialog}' 'send-keys -t =deck:main.0 %s' 'send-keys -t =deck:main.1 %s ; select-pane -t =deck:main.1'" "send-keys -t =deck:main.0 -l %s"`, key, listFocused, key, key, code)
+	inner := strings.ReplaceAll(key, `\`, `\\`)
+	return fmt.Sprintf(`bind -n %s if -F "%s" "if -F '#{@deck-dialog}' 'send-keys -t =deck:main.0 %s' 'send-keys -t =deck:main.1 %s ; select-pane -t =deck:main.1'" "send-keys -t =deck:main.0 -l %s"`, key, listFocused, inner, inner, code)
 }
 
 func slotKey(key string) string {
@@ -214,11 +216,13 @@ func WriteConf(path string, cfg store.Config) error {
 		slotKey("C-j"),
 		slotKey("C-k"),
 		slotKey("C-q"),
+		slotKey(`C-\\`),
 		fmt.Sprintf(`bind -n C-q send-keys -t =deck:main.0 -l %s`, LastKey),
 		fmt.Sprintf(`bind -n C-S-q send-keys -t =deck:main.0 -l %s`, BackKey),
 		fmt.Sprintf(`bind -T deck %s send-keys -t =deck:main.0 -l %s`, p, LastKey),
 		switchKey("C-j", NextKey),
 		switchKey("C-k", PrevKey),
+		switchKey(`C-\\`, FamilyKey),
 	}
 	lines = append(lines,
 		"set -g mouse on",

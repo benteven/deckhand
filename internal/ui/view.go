@@ -121,7 +121,7 @@ func (m *model) layout(w, h int) (blocks [][]string, hint string, room int) {
 			block = append(block, gray.Render(ansi.Truncate(header, w, "…")))
 		}
 		if m.mode == modeSuspended {
-			block = append(block, suspendedLines(r, w, now, i == m.cursor, m.prState, m.nameStyle(r), m.textHit(r.SessionID), m.query)...)
+			block = append(block, suspendedLines(r, w, now, i == m.cursor, m.prState, m.nameStyle(r), m.textHit(r.SessionID), m.query, m.state.Assistant.Paused)...)
 		} else {
 			block = append(block, rowLines(r, w, i == m.cursor, m.agentAt(i, r), m.prState, m.accountTag(r), m.nameStyle(r))...)
 		}
@@ -196,7 +196,7 @@ func (m *model) searchLine(w int) string {
 	return ansi.Truncate(line, w, "…")
 }
 
-func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState func(string) prStatus, name lipgloss.Style, hit, query string) []string {
+func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState func(string) prStatus, name lipgloss.Style, hit, query string, paused bool) []string {
 	bar := selectionBar(selected)
 	inner := max(w-2, 1)
 	meta := []string{gray.Render(ago(now, r.LastInteraction))}
@@ -206,8 +206,12 @@ func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState fun
 	for _, pr := range visiblePRs(r.Summary.PRs, prState) {
 		meta = append(meta, prText(pr, prState(pr.URL), true))
 	}
+	marks := rowMarks(r)
+	if r.Assistant && paused {
+		marks += " " + gray.Render("paused")
+	}
 	lines := []string{
-		name.Render(ansi.Truncate(r.Name, inner, "…")),
+		name.Render(ansi.Truncate(r.Name, max(inner-lipgloss.Width(marks), 1), "…")) + marks,
 		fitItems(meta, inner),
 	}
 	if hit != "" {
@@ -282,7 +286,8 @@ func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) 
 		return staleLines(r, w, selected, prState)
 	}
 	bar := selectionBar(selected)
-	inner := max(w-2, 1)
+	pad := subPad(r)
+	inner := max(w-2-len(pad), 1)
 
 	mark := ""
 	switch {
@@ -293,6 +298,7 @@ func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) 
 	case r.Kind == deck.Elsewhere:
 		mark = " " + gray.Render("elsewhere")
 	}
+	mark += rowMarks(r)
 	ctx := contextLine(r.Summary.ContextPercent())
 	if account != "" {
 		ctx += gray.Render(" · " + account)
@@ -303,7 +309,7 @@ func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) 
 	if selected {
 		name = name.Bold(true)
 	}
-	lines := []string{nameLine(r.Name, name, mark, r.Num, r.Remote, inner), ctx}
+	lines := []string{nameLine(subName(r), name, mark, r.Num, r.Remote, inner), ctx}
 	lines = append(lines, agentLines(r.Agents, inner, true)...)
 	if selected {
 		lines = append(lines, detailLines(r, inner)...)
@@ -325,9 +331,34 @@ func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) 
 		if agent >= 0 {
 			b = selectionBar(i == 2+agent)
 		}
-		lines[i] = ansi.Truncate(b+l, w, "")
+		lines[i] = ansi.Truncate(b+pad+l, w, "")
 	}
 	return lines
+}
+
+func subName(r deck.Row) string {
+	if r.Parent != "" {
+		return "↳ " + r.Name
+	}
+	return r.Name
+}
+
+func rowMarks(r deck.Row) string {
+	mark := ""
+	if r.Assistant {
+		mark += " " + gray.Render("assistant")
+	}
+	if r.Orphan != "" {
+		mark += " " + gray.Render("sub of "+r.Orphan)
+	}
+	return mark
+}
+
+func subPad(r deck.Row) string {
+	if r.Parent != "" {
+		return "  "
+	}
+	return ""
 }
 
 func detailLines(r deck.Row, width int) []string {
@@ -373,19 +404,21 @@ func agentLines(agents []transcript.Agent, width int, colored bool) []string {
 
 func staleLines(r deck.Row, w int, selected bool, prState func(string) prStatus) []string {
 	bar := selectionBar(selected)
+	pad := subPad(r)
+	inner := max(w-2-len(pad), 1)
 	pct := r.Summary.ContextPercent()
 	filled := min(max(pct, 0), 100) * barCells / 100
 	lines := []string{
-		nameLine(r.Name, gray, "", r.Num, r.Remote, max(w-2, 1)),
+		nameLine(subName(r), gray, rowMarks(r), r.Num, r.Remote, inner),
 		strings.Repeat("━", filled) + strings.Repeat("─", barCells-filled) + fmt.Sprintf(" %d%% ctx", pct),
 	}
-	lines = append(lines, agentLines(r.Agents, max(w-2, 1), false)...)
+	lines = append(lines, agentLines(r.Agents, inner, false)...)
 	var extra []string
 	for _, pr := range visiblePRs(r.Summary.PRs, prState) {
 		extra = append(extra, prText(pr, prState(pr.URL), false))
 	}
 	if len(extra) > 0 {
-		lines = append(lines, fitItems(extra, max(w-2, 1)))
+		lines = append(lines, fitItems(extra, inner))
 	}
 	if n := len(r.Summary.Artifacts); n > 0 {
 		lines = append(lines, fmt.Sprintf("Artifacts: %d", n))
@@ -394,7 +427,7 @@ func staleLines(r deck.Row, w int, selected bool, prState func(string) prStatus)
 		if i > 0 {
 			l = gray.Render(l)
 		}
-		lines[i] = ansi.Truncate(bar+l, w, "")
+		lines[i] = ansi.Truncate(bar+pad+l, w, "")
 	}
 	return lines
 }

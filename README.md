@@ -69,7 +69,8 @@ From anywhere:
 | `ctrl-b ?` | Show all keys |
 | `ctrl-q` or `ctrl-b ctrl-b` | Like Cmd-Tab: go to the next session in the list, press again to go further; when you release ctrl, the pick moves to the top |
 | `ctrl-shift-q` | The same, from the bottom of the list up |
-| `ctrl-b ctrl-j`, `ctrl-b ctrl-k`, `ctrl-b ctrl-q` | Send that key to Claude Code |
+| `ctrl-\` | Next session in the same family: the parent, then its subsessions |
+| `ctrl-b ctrl-j`, `ctrl-b ctrl-k`, `ctrl-b ctrl-q`, `ctrl-b ctrl-\` | Send that key to Claude Code |
 | `ctrl-x ctrl-b` | Claude Code's own "run in background" (its `ctrl-b`) |
 
 On macOS with the Homebrew build, deckhand sees when you release ctrl. Other builds pick the session after a 1.5 second pause.
@@ -112,6 +113,39 @@ Each account is a config folder in `~/.config/deckhand/accounts/<name>`, used as
 Each account has its own color for session names; `A` shows which color is which, and the default account stays white. `t` moves a session to the next account, and `n` starts on the account of the session under the cursor (`ctrl-a` in the folder list changes it). A switch restarts the session in place. Sessions that are busy or have an open question switch when they are idle. Sessions running elsewhere are not switched.
 
 When a session hits a usage limit, the deck moves it to an account without a limit and sends "continue". The account for new sessions comes first, then the others in order. New sessions and resumes also skip a limited account. After the reset, moved sessions go back to their own account when they are idle and not on screen. The row shows "● limit" with the reset time while no account is free, and `A` shows which accounts are limited.
+
+### Subsessions
+
+A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
+
+In the list, subsessions sit under their parent, indented with `↳`. A subsession whose parent is not running shows "sub of" and the parent's name. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
+
+When a subsession closes, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
+
+### Assistant
+
+The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. To turn it on, set `"assistant": true` in `~/.config/deckhand/config.json` and restart deckhand.
+
+The assistant is the first row in the list, with the gray mark "assistant". It runs in `~/.config/deckhand/assistant`. On the first start deckhand writes `instructions.md` there and never overwrites it, so you can edit it. The assistant keeps its task list in `tasks.md` in the same folder.
+
+The assistant has the `sessions` skill, which runs `deckhand session` commands. Only the assistant can run them:
+
+| Command | Does |
+| --- | --- |
+| `session list` | JSON lines with id, name, folder, state and what the session needs |
+| `session search <words>` | Suspended sessions that match, newest first |
+| `session start --folder F --name N [--account A] -- PROMPT` | Start a session |
+| `session resume <id>` | Resume a suspended session |
+| `session send <id> -- TEXT` | Type into a session, as you |
+| `session handoff <id>`, `session close <id>` | Hand off or stop a session |
+
+`send` types only into a normal prompt. It is refused while the session shows a permission prompt or a question menu, while you are in that pane, and while the session hands off.
+
+Menus go to you. The assistant never answers a permission prompt or a question menu in another session. When a session starts to wait for you and you are not looking at it, deckhand types a "[deckhand]" note about it into the assistant.
+
+Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand runs `claude update`, then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row shows "paused", and nothing restarts it until you resume it with Enter.
+
+The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, and marks text that begins with "[via assistant]" as coming from you.
 
 ## How it works
 
