@@ -22,6 +22,7 @@ type handoffDialog struct{ row deck.Row }
 type pendingHandoff struct {
 	id, name, file string
 	sent, cleared  time.Time
+	fresh          bool
 }
 
 func (d *handoffDialog) view(w, h int) string {
@@ -98,6 +99,12 @@ func (m *model) advanceHandoffs(now time.Time) tea.Cmd {
 			m.err = fmt.Errorf("handoff for %q stopped before the note was written", h.name)
 		case h.cleared.IsZero():
 			if r.Busy || !written(h.file, h.sent) {
+				continue
+			}
+			if h.fresh {
+				delete(m.handoffs, pane)
+				m.hint = ""
+				cmds = append(cmds, m.freshAssistant(r, h.file))
 				continue
 			}
 			h.cleared = now

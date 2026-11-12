@@ -46,6 +46,7 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 			continue
 		}
 		m.requests[req.ID] = now
+		req.Caller = m.callerOf(req)
 		if strings.HasPrefix(req.Op, "sub-") {
 			cmds = append(cmds, m.subRequest(req))
 			continue
@@ -58,6 +59,15 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *model) callerOf(req ctl.Request) string {
+	for id, pane := range m.in.Panes {
+		if req.Pane != "" && pane == req.Pane {
+			return id
+		}
+	}
+	return req.Caller
 }
 
 func (m *model) handleRequest(req ctl.Request) tea.Cmd {

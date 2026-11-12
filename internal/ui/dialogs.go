@@ -454,6 +454,10 @@ func (m *model) restartKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) restartRow(r deck.Row) tea.Cmd {
+	return m.relaunch(r, "", m.firstPrompt(r.SessionID))
+}
+
+func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 	account := m.state.AccountFor(r.SessionID)
 	if m.resuming[r.SessionID] {
 		return nil
@@ -461,6 +465,10 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 	if !accounts.LoggedIn(m.home, account) {
 		m.err = fmt.Errorf("account %s is not logged in, press A to log in", account)
 		return nil
+	}
+	if fresh == "" && m.continueAfter[r.SessionID] {
+		delete(m.continueAfter, r.SessionID)
+		prompt = "continue"
 	}
 	m.resuming[r.SessionID] = true
 	m.markEnding(r.SessionID)
@@ -472,10 +480,11 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 	if r.JobSession != "" {
 		id = r.JobSession
 	}
-	prompt := ""
-	if m.continueAfter[r.SessionID] {
-		delete(m.continueAfter, r.SessionID)
-		prompt = "continue"
+	if fresh != "" {
+		if m.isAssistant(r.SessionID) {
+			ops.AssistantID = fresh
+		}
+		id = fresh
 	}
 	run := func() tea.Msg {
 		if r.Job != "" {
@@ -486,7 +495,7 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 		if err := ops.Stop(r.PaneID, r.Busy); err != nil {
 			return restartedMsg{row: r, err: err, stopFailed: true}
 		}
-		pane, err := ops.Start(r.Cwd, id, name, true, account, prompt)
+		pane, err := ops.Start(r.Cwd, id, name, fresh == "", account, prompt)
 		return restartedMsg{row: r, id: id, pane: pane, err: err}
 	}
 	return tea.Sequence(m.showSelected(), run)
@@ -520,6 +529,9 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 }
 
 func (m *model) moveSession(from, to string) {
+	if m.isAssistant(from) {
+		m.setAssistantID(to)
+	}
 	for i := range m.state.Active {
 		if m.state.Active[i].SessionID == from {
 			m.state.Active[i].SessionID = to

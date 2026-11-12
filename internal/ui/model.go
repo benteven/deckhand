@@ -161,6 +161,7 @@ type startedMsg struct {
 	err                 error
 	rev                 *review.State
 	req, out            string
+	background          bool
 }
 
 type errMsg struct{ err error }
@@ -282,6 +283,11 @@ type model struct {
 	quitting  bool
 	inDialog  bool
 	requests  map[string]time.Time
+
+	assistantTry time.Time
+	updating     bool
+	restartDue   bool
+	notes        []string
 }
 
 func Run(version string) error {
@@ -309,9 +315,9 @@ func Run(version string) error {
 	if err != nil {
 		return err
 	}
-	rules := ""
+	rules, assistantID := "", ""
 	if cfg.Assistant {
-		rules = ctl.Rules()
+		rules, assistantID = ctl.Rules(), state.Assistant.ID
 	}
 	m := &model{
 		search:   search,
@@ -328,7 +334,7 @@ func Run(version string) error {
 			PluginDir:          filepath.Join(home, "plugin"),
 			AssistantPluginDir: filepath.Join(home, "plugin-assistant"),
 			AssistantDir:       filepath.Join(home, "assistant"),
-			AssistantID:        state.Assistant.ID,
+			AssistantID:        assistantID,
 			Rules:              rules,
 		},
 		reader:      reader,
@@ -426,8 +432,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, next
 		}
+		prev := m.in.Events
 		applied := m.apply(msg)
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests))
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()))
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -456,6 +463,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.queueCleanup(msg.id)
 	case restartedMsg:
 		return m, m.restarted(msg)
+	case updatedMsg:
+		m.updated(msg)
+	case pausedMsg:
+		return m, m.paused(msg)
 	case takenOverMsg:
 		return m, m.tookOver(msg)
 	case trashedMsg:
@@ -593,6 +604,12 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 		r, ok := m.current()
 		if !ok || (msg.String() == "s" && r.Kind != deck.Live && r.Kind != deck.Stale) {
 			return nil
+		}
+		if msg.String() == "s" && m.isAssistant(r.SessionID) {
+			if r.Kind != deck.Live || m.resuming[r.SessionID] {
+				return nil
+			}
+			return m.pauseAssistant(r)
 		}
 		if msg.String() == "s" && r.Kind == deck.Stale {
 			return m.dropStale(r)
@@ -899,6 +916,10 @@ func (m *model) endDead(panes []tmux.Pane, slotPane string) tea.Cmd {
 		}
 		inSlot = inSlot || p.ID == slotPane
 		m.markEnding(p.SessionID)
+		if m.isAssistant(p.SessionID) {
+			kills = append(kills, m.assistantDied(p.ID))
+			continue
+		}
 		kills = append(kills, m.tmux("kill-pane", "-t", p.ID))
 	}
 	if len(kills) == 0 {
@@ -1016,6 +1037,11 @@ func (m *model) enter() tea.Cmd {
 		}
 		m.resuming[r.SessionID] = true
 		delete(m.ending, r.SessionID)
+		if m.isAssistant(r.SessionID) && m.state.Assistant.Paused {
+			m.state.Assistant.Paused = false
+			m.assistantTry = time.Now()
+			return tea.Batch(m.saveState(), m.resume(r))
+		}
 		return m.resume(r)
 	}
 	return nil
@@ -1030,6 +1056,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 			return m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
 		}
 		m.err = msg.err
+		if msg.background {
+			return nil
+		}
 		if inBatch {
 			return m.finishBatch()
 		}
@@ -1038,7 +1067,7 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.rev != nil {
 		m.reviewStarted(msg.id, *msg.rev)
 	}
-	if msg.req == "" {
+	if msg.req == "" && !msg.background {
 		m.setMode(modeActive)
 	}
 	entry := store.ActiveEntry{SessionID: msg.id, Cwd: msg.cwd, Name: msg.name, LastInteraction: time.Now()}
@@ -1058,6 +1087,10 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.req != "" {
 		m.rebuild()
 		return tea.Batch(m.saveState(), m.answer(msg.req, ctl.Reply{Out: msg.out}))
+	}
+	if msg.background {
+		m.rebuild()
+		return m.saveState()
 	}
 	if inBatch {
 		m.rebuild()
@@ -1090,7 +1123,7 @@ func (m *model) finishBatch() tea.Cmd {
 func (m *model) staleRows() []deck.Row {
 	var rows []deck.Row
 	for _, r := range m.active {
-		if r.Kind == deck.Stale {
+		if r.Kind == deck.Stale && !m.isAssistant(r.SessionID) {
 			rows = append(rows, r)
 		}
 	}
@@ -1268,6 +1301,12 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 		old := p.SessionID
 		entry := &m.state.Active[k]
 		entry.SessionID, entry.Name = next.SessionID, ""
+		if m.isAssistant(old) {
+			m.setAssistantID(next.SessionID)
+			if n, ok := m.state.Names[old]; ok {
+				m.state.Names[next.SessionID] = n
+			}
+		}
 		if next.Cwd != "" {
 			entry.Cwd = next.Cwd
 		}
@@ -1589,6 +1628,7 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 	name, home := m.state.Names[r.SessionID], m.home
 	sub, isSub := m.state.SubOf(r.SessionID)
 	queued := slices.Contains(m.state.Cleanups, r.SessionID)
+	prompt := m.firstPrompt(r.SessionID)
 	return func() tea.Msg {
 		if isSub && queued {
 			return startedMsg{id: r.SessionID, err: fmt.Errorf("answer the worktree question for %s first", sub.Name)}
@@ -1600,7 +1640,7 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 		if st, ok, _ := review.Load(home, r.SessionID); ok {
 			rev = &st
 		}
-		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "")
+		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, prompt)
 		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
 	}
 }

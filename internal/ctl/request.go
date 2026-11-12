@@ -22,6 +22,7 @@ type Request struct {
 	ID      string
 	Op      string
 	Caller  string
+	Pane    string
 	Target  string
 	Name    string
 	Folder  string
