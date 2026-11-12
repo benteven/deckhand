@@ -303,6 +303,10 @@ type model struct {
 	stoppedAt     map[string]time.Time
 	reprompt      time.Time
 	typing        map[string]bool
+	asking        map[string]bool
+	projectNotes  map[string][]string
+	closing       map[string]bool
+	idleSince     map[string]time.Time
 }
 
 func Run(version string) error {
@@ -454,7 +458,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prev := m.in.Events
 		applied := m.apply(msg)
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.pruneQueues(time.Now()), m.deliverTurns())
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.pruneQueues(time.Now()), m.deliverTurns(), m.taskTick(time.Now()))
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -515,14 +519,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gotPRInfo(msg)
 	case stopFailedMsg:
 		m.err = msg.err
-		delete(m.ending, msg.entry.SessionID)
-		if !slices.ContainsFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == msg.entry.SessionID }) {
-			entry := msg.entry
-			entry.Num = store.Claim(m.state.Active, entry.Num)
-			m.state.Active = append(m.state.Active, entry)
-		}
+		m.restoreActive(msg.entry)
 		m.rebuild()
 		return m, m.saveState()
+	case taskClosedMsg:
+		return m, m.taskClosed(msg)
 	case tea.MouseClickMsg:
 		return m, m.click(msg.Mouse())
 	case tea.MouseWheelMsg:
@@ -920,7 +921,7 @@ func (m *model) confirmRename(d *renameDialog) tea.Cmd {
 	return m.suspend(m.shown()[i], "")
 }
 
-func (m *model) suspend(r deck.Row, req string) tea.Cmd {
+func (m *model) detach(r deck.Row) (store.ActiveEntry, tea.Cmd) {
 	var entry store.ActiveEntry
 	for _, e := range m.state.Active {
 		if e.SessionID == r.SessionID {
@@ -930,7 +931,19 @@ func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == r.SessionID })
 	m.markEnding(r.SessionID)
 	m.rebuild()
-	drop := m.dropFromQueues(r.SessionID)
+	return entry, m.dropFromQueues(r.SessionID)
+}
+
+func (m *model) restoreActive(entry store.ActiveEntry) {
+	delete(m.ending, entry.SessionID)
+	if !slices.ContainsFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == entry.SessionID }) {
+		entry.Num = store.Claim(m.state.Active, entry.Num)
+		m.state.Active = append(m.state.Active, entry)
+	}
+}
+
+func (m *model) suspend(r deck.Row, req string) tea.Cmd {
+	entry, drop := m.detach(r)
 	ops, pane, busy, home := m.ops, r.PaneID, r.Busy, m.home
 	sub := m.ownsWorktree(r.SessionID)
 	stop := func() tea.Msg {
@@ -1735,6 +1748,10 @@ func (m *model) launch(l deck.Launch) tea.Cmd {
 
 func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (pane string, warn, err error) {
 	home, role, model := m.home, m.state.Roles[id], m.modelFor(id)
+	notes := ""
+	if m.projectOf(id) {
+		notes = projectNotesText(m.notesPath(id))
+	}
 	return func(l deck.Launch) (string, error, error) {
 		l.Model = model
 		var warn error
@@ -1744,6 +1761,9 @@ func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (pane string,
 			} else {
 				warn = fmt.Errorf("role %s not found; started without it", role)
 			}
+		}
+		if notes != "" {
+			l.System = strings.TrimSpace(l.System + "\n\n" + notes)
 		}
 		pane, err := ops.Start(l)
 		return pane, warn, err
@@ -1781,27 +1801,36 @@ func (m *model) fetchPRs() tea.Cmd {
 	if m.noGH {
 		return nil
 	}
-	now := time.Now()
-	var cmds []tea.Cmd
+	var urls []string
 	for _, r := range m.visibleRows() {
 		for _, pr := range r.Summary.PRs {
-			e := m.prs[pr.URL]
-			if pr.URL == "" || (e != nil && (e.pending || now.Before(e.until))) {
-				continue
-			}
-			if e == nil {
-				e = &prEntry{}
-				m.prs[pr.URL] = e
-			}
-			e.pending = true
-			url, sem := pr.URL, m.prSem
-			cmds = append(cmds, func() tea.Msg {
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				state, checks, err := gh.State(url)
-				return prStateMsg{url: url, state: state, checks: checks, err: err}
-			})
+			urls = append(urls, pr.URL)
 		}
+	}
+	for _, t := range m.tasks {
+		if t.Status != "done" {
+			urls = append(urls, t.PR)
+		}
+	}
+	now := time.Now()
+	var cmds []tea.Cmd
+	for _, url := range urls {
+		e := m.prs[url]
+		if url == "" || (e != nil && (e.pending || now.Before(e.until))) {
+			continue
+		}
+		if e == nil {
+			e = &prEntry{}
+			m.prs[url] = e
+		}
+		e.pending = true
+		sem := m.prSem
+		cmds = append(cmds, func() tea.Msg {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			state, checks, err := gh.State(url)
+			return prStateMsg{url: url, state: state, checks: checks, err: err}
+		})
 	}
 	return tea.Batch(cmds...)
 }

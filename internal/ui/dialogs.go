@@ -604,6 +604,10 @@ func (m *model) remapSubs(from, to string) {
 			delete(links, from)
 		}
 	}
+	if v, ok := m.projectNotes[from]; ok {
+		m.projectNotes[to] = v
+		delete(m.projectNotes, from)
+	}
 	for _, q := range m.state.Queues {
 		for i, id := range q {
 			if id == from {

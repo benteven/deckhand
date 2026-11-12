@@ -149,6 +149,11 @@ func Remove(repo, name string, trash func(...string) error) error {
 	return err
 }
 
+func DeleteBranch(repo, branch string) error {
+	_, err := git(repo, "branch", "-D", branch)
+	return err
+}
+
 func FirstPrompt(parent, dir, branch, task string) string {
 	return fmt.Sprintf("You are a subsession of %s, started by deckhand. You work in your own git worktree at %s, on branch %s. Report to %s with SendMessage when you finish or need a decision.\n\nTask:\n%s", parent, dir, branch, parent, task)
 }

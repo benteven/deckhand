@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -13,9 +15,11 @@ import (
 
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/gh"
 	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tasks"
+	"github.com/benteven/deckhand/internal/typing"
 )
 
 type taskCreatedMsg struct {
@@ -95,12 +99,14 @@ func (m *model) taskRequest(req ctl.Request) tea.Cmd {
 		}
 		t := m.tasks[i]
 		out := "updated"
+		var told tea.Cmd
 		if req.Op == "task-done" {
 			if t.Status == "done" {
 				return fail("task %s is done already", t.ID)
 			}
 			t.Status, t.Summary, out = "done", req.Args["summary"], "done"
 			t.Log(now, "done")
+			told = m.taskSummary(t, now)
 		} else {
 			if _, ok := req.Args["project"]; ok && !assistant {
 				return fail("only the assistant can change the project")
@@ -112,7 +118,7 @@ func (m *model) taskRequest(req ctl.Request) tea.Cmd {
 			t.Log(now, strings.Join(changes, ", "))
 		}
 		m.tasks[i] = t
-		return tea.Batch(m.saveTasks(), m.answer(req.ID, ctl.Reply{Out: out}))
+		return tea.Batch(m.saveTasks(), m.answer(req.ID, ctl.Reply{Out: out}), told)
 	}
 	return fail("unknown request %s", req.Op)
 }
@@ -250,10 +256,13 @@ func (m *model) projectRequest(req ctl.Request) tea.Cmd {
 		if m.isAssistant(req.Target) {
 			return fail("the assistant cannot be a project")
 		}
+		var told tea.Cmd
 		if !m.projectOf(req.Target) {
 			m.state.Projects = append(m.state.Projects, req.Target)
+			m.tellProject(req.Target, "[deckhand] you are a project now. "+projectNotesText(m.notesPath(req.Target)))
+			told = m.deliverProjectNotes()
 		}
-		return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "marked"}))
+		return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "marked"}), told)
 	case "project-unmark":
 		if !m.projectOf(req.Target) {
 			return fail("%s is not a project", req.Target)
@@ -532,4 +541,264 @@ func (m *model) roleFound(msg roleFoundMsg) tea.Cmd {
 	launch := deck.Launch{Cwd: t.Dir, SessionID: id, Name: name, Account: m.state.AccountFor(t.Session), Prompt: prompt, ForkOf: t.Session, ForkCwd: t.Dir}
 	out := fmt.Sprintf("started %s for task %s as %s in %s", req.Name, t.ID, name, t.Dir)
 	return tea.Batch(m.saveState(), forRequest(m.launch(launch), req.ID, out))
+}
+
+const (
+	mergedLog   = "PR merged; asked for a summary"
+	projectIdle = 10 * time.Minute
+)
+
+type taskClosedMsg struct {
+	id      string
+	failed  []store.ActiveEntry
+	removed bool
+	err     error
+}
+
+func (m *model) taskTick(now time.Time) tea.Cmd {
+	return tea.Batch(m.askSummaries(), m.deliverProjectNotes(), m.closeDoneTasks(), m.suspendIdleProjects(now))
+}
+
+func (m *model) notesPath(id string) string {
+	name := m.sessionName(id)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		name = id
+	}
+	return filepath.Join(m.home, "projects", name, "notes.md")
+}
+
+func projectNotesText(path string) string {
+	return fmt.Sprintf("Your project notes file is %s. Read it when you start. Deckhand adds the summary of each finished task to it.", path)
+}
+
+func (m *model) askSummaries() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, t := range m.tasks {
+		if t.Status == "done" || t.Session == "" || t.PR == "" || m.asking[t.ID] {
+			continue
+		}
+		if e := m.prs[t.PR]; e == nil || e.state != "merged" {
+			continue
+		}
+		if slices.ContainsFunc(t.History, func(e tasks.Entry) bool { return e.Text == mergedLog }) {
+			continue
+		}
+		r, ok := m.rowByID(t.Session)
+		if !ok || r.Kind != deck.Live || m.resuming[t.Session] || m.handoffs[r.PaneID] != nil || !m.userAway(r) || !m.canType(r) {
+			continue
+		}
+		if m.asking == nil {
+			m.asking = map[string]bool{}
+		}
+		id := t.ID
+		m.asking[id] = true
+		text := fmt.Sprintf("[deckhand] PR %s is merged. Write a summary of five lines or fewer with deckhand task done --summary TEXT.", t.PR)
+		cmds = append(cmds, m.typeIn(r, text, func(err error) tea.Cmd {
+			delete(m.asking, id)
+			if errors.Is(err, typing.ErrMenu) {
+				return nil
+			}
+			if err != nil {
+				m.err = typeError(r.Name, err)
+			}
+			k := slices.IndexFunc(m.tasks, func(t tasks.Task) bool { return t.ID == id })
+			if k < 0 {
+				return nil
+			}
+			m.tasks[k].Log(time.Now(), mergedLog)
+			return m.saveTasks()
+		}))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) taskSummary(t tasks.Task, now time.Time) tea.Cmd {
+	summary := strings.TrimSpace(t.Summary)
+	if summary == "" || t.Project == "" {
+		return nil
+	}
+	m.tellProject(t.Project, fmt.Sprintf("[deckhand] task %s \"%s\" is done: %s", t.ID, t.Title, summary))
+	path, entry := m.notesPath(t.Project), fmt.Sprintf("## %s %s\n%s\n", now.Format(time.DateOnly), t.Title, summary)
+	return tea.Batch(m.deliverProjectNotes(), func() tea.Msg {
+		if err := appendNotes(path, entry); err != nil {
+			return errMsg{err}
+		}
+		return nil
+	})
+}
+
+func appendNotes(path, entry string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(entry)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+func (m *model) tellProject(id, text string) {
+	if m.projectNotes == nil {
+		m.projectNotes = map[string][]string{}
+	}
+	m.projectNotes[id] = append(m.projectNotes[id], text)
+}
+
+func (m *model) deliverProjectNotes() tea.Cmd {
+	var cmds []tea.Cmd
+	for id, notes := range m.projectNotes {
+		r, ok := m.rowByID(id)
+		if !ok || r.Kind != deck.Live || m.resuming[id] || m.handoffs[r.PaneID] != nil || !m.userAway(r) || !m.canType(r) {
+			continue
+		}
+		delete(m.projectNotes, id)
+		cmds = append(cmds, m.typeIn(r, strings.Join(notes, "\n"), func(err error) tea.Cmd {
+			switch {
+			case errors.Is(err, typing.ErrMenu):
+				m.projectNotes[id] = append(notes, m.projectNotes[id]...)
+			case err != nil:
+				m.err = typeError(r.Name, err)
+			}
+			return nil
+		}))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) closeDoneTasks() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, t := range m.tasks {
+		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) {
+			continue
+		}
+		if m.cleanup != nil && m.cleanup.sub.ID == t.Session {
+			continue
+		}
+		cmds = append(cmds, m.closeTask(t))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) closeTask(t tasks.Task) tea.Cmd {
+	sub, _ := m.state.SubOf(t.Session)
+	var rows []deck.Row
+	for _, s := range m.state.Subs {
+		if s.Dir != sub.Dir {
+			continue
+		}
+		r, ok := m.rowByID(s.ID)
+		live := ok && r.Kind == deck.Live
+		switch {
+		case m.resuming[s.ID], ok && (r.Kind == deck.Elsewhere || r.Job != ""), !live && m.in.Panes[s.ID] != "", live && m.slot == r.PaneID && !m.focused:
+			return nil
+		case live:
+			rows = append(rows, r)
+		}
+	}
+	if m.closing == nil {
+		m.closing = map[string]bool{}
+	}
+	m.closing[sub.ID] = true
+	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
+	var cmds []tea.Cmd
+	entries := make([]store.ActiveEntry, len(rows))
+	for k, r := range rows {
+		var drop tea.Cmd
+		entries[k], drop = m.detach(r)
+		cmds = append(cmds, drop)
+	}
+	ops, pr, noGH := m.ops, t.PR, m.noGH
+	merged := m.prs[pr] != nil && m.prs[pr].state == "merged"
+	run := func() tea.Msg {
+		msg := taskClosedMsg{id: sub.ID}
+		for k, r := range rows {
+			if err := ops.Stop(r.PaneID, r.Busy); err != nil {
+				msg.failed, msg.err = append(msg.failed, entries[k]), err
+			}
+		}
+		if msg.err != nil {
+			return msg
+		}
+		if _, err := os.Stat(ctl.Worktree(sub.Repo, sub.Name)); err == nil {
+			if msg.err = ctl.Remove(sub.Repo, sub.Name, deck.Trash); msg.err != nil {
+				return msg
+			}
+		}
+		msg.removed = true
+		if !merged && pr != "" && !noGH {
+			state, _, err := gh.State(pr)
+			merged = err == nil && state == "merged"
+		}
+		if merged {
+			msg.err = ctl.DeleteBranch(sub.Repo, sub.Branch)
+		}
+		return msg
+	}
+	return tea.Batch(append(cmds, m.saveState(), tea.Sequence(m.showSelected(), run))...)
+}
+
+func (m *model) taskClosed(msg taskClosedMsg) tea.Cmd {
+	for _, entry := range msg.failed {
+		m.restoreActive(entry)
+	}
+	if msg.err != nil {
+		m.err = msg.err
+	}
+	if !msg.removed {
+		m.rebuild()
+		return m.saveState()
+	}
+	delete(m.closing, msg.id)
+	return m.worktreeRemoved(worktreeRemovedMsg{id: msg.id})
+}
+
+func (m *model) suspendIdleProjects(now time.Time) tea.Cmd {
+	if !m.ops.Cfg.Assistant {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for id := range m.idleSince {
+		if !m.projectOf(id) {
+			delete(m.idleSince, id)
+		}
+	}
+	for _, id := range m.state.Projects {
+		r, ok := m.rowByID(id)
+		if !ok || r.Kind != deck.Live || !m.projectIdle(r) {
+			delete(m.idleSince, id)
+			continue
+		}
+		if m.idleSince == nil {
+			m.idleSince = map[string]time.Time{}
+		}
+		since, seen := m.idleSince[id]
+		if !seen {
+			m.idleSince[id] = now
+			continue
+		}
+		if now.Sub(since) >= projectIdle {
+			delete(m.idleSince, id)
+			cmds = append(cmds, m.suspend(r, ""))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) projectIdle(r deck.Row) bool {
+	id := r.SessionID
+	if m.resuming[id] || r.Busy || r.Asking || !m.userAway(r) || m.typing[r.PaneID] || m.handoffs[r.PaneID] != nil || len(m.projectNotes[id]) > 0 {
+		return false
+	}
+	if slices.ContainsFunc(m.tasks, func(t tasks.Task) bool { return t.Project == id && slices.Contains(taskStatuses, t.Status) }) {
+		return false
+	}
+	return !slices.ContainsFunc(m.state.Subs, func(s store.Subsession) bool {
+		sr, ok := m.rowByID(s.ID)
+		return s.Parent == id && (m.resuming[s.ID] || ok && (sr.Kind == deck.Live || sr.Kind == deck.Elsewhere))
+	})
 }
