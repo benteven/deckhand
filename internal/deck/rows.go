@@ -136,6 +136,28 @@ func Build(in Inputs) (active, suspended []Row) {
 		}
 		return active[i].LastInteraction.After(active[j].LastInteraction)
 	})
+	if id := in.State.Assistant.ID; in.State.Assistant.Paused && id != "" && !seen[id] {
+		for _, f := range in.Files {
+			if f.SessionID != id {
+				continue
+			}
+			seen[id] = true
+			sum := in.Summaries[id]
+			last := sum.LastUsed
+			if last.IsZero() {
+				last = f.ModTime
+			}
+			active = append(active, Row{
+				SessionID:       id,
+				Name:            name(in.State, "", live.Session{}, id, sum),
+				Cwd:             sum.Cwd,
+				TranscriptPath:  f.Path,
+				Kind:            Suspended,
+				Summary:         sum,
+				LastInteraction: last,
+			})
+		}
+	}
 	active = arrange(in.State, active)
 
 	for _, f := range in.Files {

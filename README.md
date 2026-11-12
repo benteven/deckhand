@@ -143,7 +143,7 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 
 Menus go to you. The assistant never answers a permission prompt or a question menu in another session. When a session starts to wait for you and you are not looking at it, deckhand types a "[deckhand]" note about it into the assistant.
 
-Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand runs `claude update`, then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row shows "paused", and nothing restarts it until you resume it with Enter.
+Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand runs `claude update`, then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row stays at the top of Active with the marks "assistant" and "paused", and nothing restarts it until you resume it with Enter.
 
 The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, and marks text that begins with "[via assistant]" as coming from you.
 

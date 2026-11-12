@@ -121,7 +121,7 @@ func (m *model) layout(w, h int) (blocks [][]string, hint string, room int) {
 			block = append(block, gray.Render(ansi.Truncate(header, w, "…")))
 		}
 		if m.mode == modeSuspended {
-			block = append(block, suspendedLines(r, w, now, i == m.cursor, m.prState, m.nameStyle(r), m.textHit(r.SessionID), m.query, m.state.Assistant.Paused)...)
+			block = append(block, suspendedLines(r, w, now, i == m.cursor, m.prState, m.nameStyle(r), m.textHit(r.SessionID), m.query)...)
 		} else {
 			block = append(block, rowLines(r, w, i == m.cursor, m.agentAt(i, r), m.prState, m.accountTag(r), m.nameStyle(r))...)
 		}
@@ -196,7 +196,7 @@ func (m *model) searchLine(w int) string {
 	return ansi.Truncate(line, w, "…")
 }
 
-func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState func(string) prStatus, name lipgloss.Style, hit, query string, paused bool) []string {
+func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState func(string) prStatus, name lipgloss.Style, hit, query string) []string {
 	bar := selectionBar(selected)
 	inner := max(w-2, 1)
 	meta := []string{gray.Render(ago(now, r.LastInteraction))}
@@ -206,12 +206,8 @@ func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState fun
 	for _, pr := range visiblePRs(r.Summary.PRs, prState) {
 		meta = append(meta, prText(pr, prState(pr.URL), true))
 	}
-	marks := rowMarks(r)
-	if r.Assistant && paused {
-		marks += " " + gray.Render("paused")
-	}
 	lines := []string{
-		name.Render(ansi.Truncate(r.Name, max(inner-lipgloss.Width(marks), 1), "…")) + marks,
+		name.Render(ansi.Truncate(r.Name, inner, "…")),
 		fitItems(meta, inner),
 	}
 	if hit != "" {
@@ -347,6 +343,9 @@ func rowMarks(r deck.Row) string {
 	mark := ""
 	if r.Assistant {
 		mark += " " + gray.Render("assistant")
+		if r.Kind == deck.Suspended {
+			mark += " " + gray.Render("paused")
+		}
 	}
 	if r.Orphan != "" {
 		mark += " " + gray.Render("sub of "+r.Orphan)
