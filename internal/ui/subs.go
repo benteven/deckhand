@@ -121,9 +121,13 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 }
 
 func (m *model) queueCleanup(id string) tea.Cmd {
-	if i, ok := m.taskOf(id); ok && m.tasks[i].Status == "done" {
+	if i, ok := m.taskOf(id); ok && m.tasks[i].Status == "done" && m.merged(m.tasks[i]) {
 		return nil
 	}
+	return m.askCleanup(id)
+}
+
+func (m *model) askCleanup(id string) tea.Cmd {
 	if !slices.Contains(m.state.Cleanups, id) {
 		m.state.Cleanups = append(m.state.Cleanups, id)
 	}

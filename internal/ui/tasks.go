@@ -545,6 +545,7 @@ func (m *model) roleFound(msg roleFoundMsg) tea.Cmd {
 
 const (
 	mergedLog   = "PR merged; asked for a summary"
+	askedLog    = "asked about the worktree"
 	projectIdle = 10 * time.Minute
 )
 
@@ -552,6 +553,7 @@ type taskClosedMsg struct {
 	id      string
 	failed  []store.ActiveEntry
 	removed bool
+	ask     bool
 	err     error
 }
 
@@ -580,7 +582,7 @@ func (m *model) askSummaries() tea.Cmd {
 		if e := m.prs[t.PR]; e == nil || e.state != "merged" {
 			continue
 		}
-		if slices.ContainsFunc(t.History, func(e tasks.Entry) bool { return e.Text == mergedLog }) {
+		if logged(t, mergedLog) {
 			continue
 		}
 		r, ok := m.rowByID(t.Session)
@@ -673,7 +675,7 @@ func (m *model) deliverProjectNotes() tea.Cmd {
 func (m *model) closeDoneTasks() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, t := range m.tasks {
-		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) {
+		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) || logged(t, askedLog) {
 			continue
 		}
 		if m.cleanup != nil && m.cleanup.sub.ID == t.Session {
@@ -704,7 +706,6 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 		m.closing = map[string]bool{}
 	}
 	m.closing[sub.ID] = true
-	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
 	var cmds []tea.Cmd
 	entries := make([]store.ActiveEntry, len(rows))
 	for k, r := range rows {
@@ -713,7 +714,7 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 		cmds = append(cmds, drop)
 	}
 	ops, pr, noGH := m.ops, t.PR, m.noGH
-	merged := m.prs[pr] != nil && m.prs[pr].state == "merged"
+	merged := m.merged(t)
 	run := func() tea.Msg {
 		msg := taskClosedMsg{id: sub.ID}
 		for k, r := range rows {
@@ -724,19 +725,21 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 		if msg.err != nil {
 			return msg
 		}
+		if !merged && pr != "" && !noGH {
+			state, _, err := gh.State(pr)
+			merged = err == nil && state == "merged"
+		}
+		if !merged {
+			msg.ask = true
+			return msg
+		}
 		if _, err := os.Stat(ctl.Worktree(sub.Repo, sub.Name)); err == nil {
 			if msg.err = ctl.Remove(sub.Repo, sub.Name, deck.Trash); msg.err != nil {
 				return msg
 			}
 		}
 		msg.removed = true
-		if !merged && pr != "" && !noGH {
-			state, _, err := gh.State(pr)
-			merged = err == nil && state == "merged"
-		}
-		if merged {
-			msg.err = ctl.DeleteBranch(sub.Repo, sub.Branch)
-		}
+		msg.err = ctl.DeleteBranch(sub.Repo, sub.Branch)
 		return msg
 	}
 	return tea.Batch(append(cmds, m.saveState(), tea.Sequence(m.showSelected(), run))...)
@@ -749,12 +752,28 @@ func (m *model) taskClosed(msg taskClosedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.err = msg.err
 	}
+	if msg.ask {
+		if i, ok := m.taskOf(msg.id); ok {
+			m.tasks[i].Log(time.Now(), askedLog)
+		}
+		m.rebuild()
+		return tea.Batch(m.saveTasks(), m.askCleanup(msg.id))
+	}
 	if !msg.removed {
 		m.rebuild()
 		return m.saveState()
 	}
 	delete(m.closing, msg.id)
+	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == msg.id })
 	return m.worktreeRemoved(worktreeRemovedMsg{id: msg.id})
+}
+
+func logged(t tasks.Task, text string) bool {
+	return slices.ContainsFunc(t.History, func(e tasks.Entry) bool { return e.Text == text })
+}
+
+func (m *model) merged(t tasks.Task) bool {
+	return m.prs[t.PR] != nil && m.prs[t.PR].state == "merged"
 }
 
 func (m *model) suspendIdleProjects(now time.Time) tea.Cmd {
