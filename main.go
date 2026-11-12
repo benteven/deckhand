@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
+	"github.com/benteven/deckhand/internal/web"
 )
 
 var version = "dev"
@@ -66,6 +69,11 @@ func main() {
 		runCtl("session", os.Args[2:])
 	case "sub", "task", "project", "role", "queue":
 		runCtl(os.Args[1], os.Args[2:])
+	case "page":
+		if err := openPage(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "version":
 		fmt.Println(version)
 	case "ui":
@@ -102,6 +110,26 @@ func markBuild() {
 	if _, err := client.Run("set-option", "-p", "-t", pane, tmux.BuildOption, build); err != nil {
 		fmt.Fprintln(os.Stderr, "warning:", err)
 	}
+}
+
+func openPage() error {
+	home := paths.DeckHome()
+	cfg, err := store.LoadConfig(home)
+	if err != nil {
+		return err
+	}
+	if !cfg.Assistant {
+		return errors.New("the task page runs with the assistant; turn it on with G in the list")
+	}
+	token, err := web.Token(home)
+	if err != nil {
+		return err
+	}
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	return exec.Command(opener, web.URL(cfg.WebPort, token)).Run()
 }
 
 func runPreview(args []string) {

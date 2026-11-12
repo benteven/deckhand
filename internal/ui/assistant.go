@@ -280,7 +280,7 @@ func (m *model) assistantFree(r deck.Row) bool {
 }
 
 func (m *model) userAway(r deck.Row) bool {
-	return !(m.slot == r.PaneID && !m.focused) && !m.in.Events[r.SessionID].Menu()
+	return !m.userIn(r) && !m.in.Events[r.SessionID].Menu()
 }
 
 func (m *model) deliverNotes() tea.Cmd {
@@ -372,11 +372,13 @@ func (m *model) setAssistant(on bool) tea.Cmd {
 	var stop tea.Cmd
 	m.ops.Cfg.Assistant = on
 	m.stopAssistant = false
+	var page tea.Cmd
 	if on {
 		m.state.Assistant.Paused = false
 		m.assistantTry = time.Time{}
 		m.ops.Rules, m.ops.AssistantID = ctl.Rules(), m.state.Assistant.ID
 		m.hint = "The assistant starts in a few seconds"
+		page = m.startWeb()
 	} else {
 		m.hint = "The assistant is off"
 		if r, ok := m.rowByID(m.state.Assistant.ID); ok {
@@ -391,7 +393,8 @@ func (m *model) setAssistant(on bool) tea.Cmd {
 		}
 		m.ops.Rules, m.ops.AssistantID = "", ""
 		m.notes, m.reprompt = nil, time.Time{}
+		m.stopWeb()
 	}
 	m.rebuild()
-	return tea.Batch(stop, m.saveState(), m.showSelected())
+	return tea.Batch(stop, page, m.saveState(), m.showSelected())
 }

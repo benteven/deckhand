@@ -17,11 +17,13 @@ type Config struct {
 	ListWidth      int      `json:"list_width"`
 	Assistant      bool     `json:"assistant"`
 	AssistantModel string   `json:"assistant_model"`
+	WebPort        int      `json:"web_port"`
 }
 
 const (
 	DefaultListWidth      = 36
 	DefaultAssistantModel = "sonnet"
+	DefaultWebPort        = 7317
 	MinListWidth          = 24
 	MaxListWidth          = 100
 )
@@ -148,9 +150,12 @@ func readJSON(path string, v any) error {
 }
 
 func LoadConfig(dir string) (Config, error) {
-	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel}
+	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel, WebPort: DefaultWebPort}
 	if err := readJSON(filepath.Join(dir, "config.json"), &c); err != nil {
-		return Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel}, err
+		return Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel, WebPort: DefaultWebPort}, err
+	}
+	if c.WebPort <= 0 || c.WebPort > 65535 {
+		c.WebPort = DefaultWebPort
 	}
 	if c.AssistantModel == "" {
 		c.AssistantModel = DefaultAssistantModel

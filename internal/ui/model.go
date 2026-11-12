@@ -29,6 +29,7 @@ import (
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/update"
+	"github.com/benteven/deckhand/internal/web"
 )
 
 const (
@@ -307,6 +308,14 @@ type model struct {
 	projectNotes  map[string][]string
 	closing       map[string]bool
 	idleSince     map[string]time.Time
+
+	send        func(tea.Msg)
+	web         *web.Server
+	published   []byte
+	shooting    bool
+	menus       map[string]menuShot
+	chat        []web.ChatLine
+	pageAnswers []pageAnswer
 }
 
 func Run(version string) error {
@@ -376,7 +385,9 @@ func Run(version string) error {
 		noGH:        !hasGH(),
 		version:     version,
 	}
-	_, err = tea.NewProgram(m).Run()
+	p := tea.NewProgram(m)
+	m.send = p.Send
+	_, err = p.Run()
 	if serr := reader.Save(); err == nil {
 		err = serr
 	}
@@ -385,7 +396,11 @@ func Run(version string) error {
 
 func (m *model) Init() tea.Cmd {
 	home := m.home
-	return tea.Batch(m.refresh(), m.dialogFlag(), m.nextCleanup(), func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
+	var page tea.Cmd
+	if m.ops.Cfg.Assistant {
+		page = m.startWeb()
+	}
+	return tea.Batch(m.refresh(), m.dialogFlag(), m.nextCleanup(), page, func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -458,7 +473,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prev := m.in.Events
 		applied := m.apply(msg)
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.pruneQueues(time.Now()), m.deliverTurns(), m.taskTick(time.Now()))
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.pruneQueues(time.Now()), m.deliverTurns(), m.taskTick(time.Now()), m.pageTick())
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -524,6 +539,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.saveState()
 	case taskClosedMsg:
 		return m, m.taskClosed(msg)
+	case pageMsg:
+		return m, m.pageAction(msg.action)
+	case pageShotMsg:
+		m.pageShot(msg)
+	case webStoppedMsg:
+		m.webStopped(msg)
 	case tea.MouseClickMsg:
 		return m, m.click(msg.Mouse())
 	case tea.MouseWheelMsg:

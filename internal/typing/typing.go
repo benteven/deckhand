@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,9 +19,37 @@ var (
 	ErrMenu   = errors.New("the session shows a menu")
 	ErrPasted = errors.New("a menu opened before Enter")
 
-	seq      atomic.Int64
-	menuLine = regexp.MustCompile(`(?m)^\s*(❯\s*)?1\.\s+Yes\b`)
+	seq        atomic.Int64
+	menuLine   = regexp.MustCompile(`(?m)^\s*(❯\s*)?1\.\s+Yes\b`)
+	choiceLine = regexp.MustCompile(`^[\s│]*(❯\s*)?([1-9])\.\s+(.*?)[\s│]*$`)
 )
+
+func Choices(screen string) []string {
+	lines := strings.Split(screen, "\n")
+	start := -1
+	for i := len(lines) - 1; i >= 0 && start < 0; i-- {
+		if m := choiceLine.FindStringSubmatch(lines[i]); m != nil && m[2] == "1" {
+			start = i
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	var choices []string
+	cursor := false
+	for _, line := range lines[start:] {
+		m := choiceLine.FindStringSubmatch(line)
+		if m == nil || m[2] != strconv.Itoa(len(choices)+1) {
+			continue
+		}
+		choices = append(choices, m[3])
+		cursor = cursor || m[1] != ""
+	}
+	if !cursor {
+		return nil
+	}
+	return choices
+}
 
 func Asking(t tmux.Client, id, pane string) bool {
 	sessions, _ := live.Running(paths.ClaudeHome())
