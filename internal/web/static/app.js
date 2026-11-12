@@ -46,8 +46,9 @@ function el(tag, props, ...kids) {
 
 function group(t) {
   if (t.status === "needs-you") return 0;
-  if (t.status === "waiting") return 2;
-  return 1;
+  if (t.status === "todo") return 1;
+  if (t.status === "waiting") return 3;
+  return 2;
 }
 
 function plain(t) {
@@ -187,8 +188,9 @@ function listPage(v) {
   const ts = v.tasks || [];
   return [
     section("Needs you", [...ts.filter((t) => group(t) === 0).map(taskRow), ...(v.waiting || []).map(sessionRow)], "Nothing needs you."),
-    section("Working", ts.filter((t) => group(t) === 1).map(taskRow), "Nothing is in work."),
-    section("Waiting on others", ts.filter((t) => group(t) === 2).map(taskRow), "Nothing waits on others."),
+    section("To do", ts.filter((t) => group(t) === 1).map(taskRow), "Nothing to do."),
+    section("Working", ts.filter((t) => group(t) === 2).map(taskRow), "Nothing is in work."),
+    section("Waiting on others", ts.filter((t) => group(t) === 3).map(taskRow), "Nothing waits on others."),
   ];
 }
 
@@ -203,11 +205,7 @@ function taskPage(v, id) {
   if (!t) return [back, el("p", { class: "empty", text: "This task is not open. It may be done." })];
   const key = "t:" + t.id;
   const meta = [t.project_name, (t.prio || "normal") + " prio", t.deadline && "due " + t.deadline, t.from && "from " + t.from].filter(Boolean).join(" · ");
-  const tests = [...(t.history || [])].reverse().find((h) => /\btest/i.test(h.text));
-  const facts = [
-    t.pr ? el("a", { href: t.pr, target: "_blank", rel: "noopener noreferrer", text: prLabel(t.pr) }) : null,
-    tests ? el("span", { text: "Tests: " + tests.text }) : null,
-  ].filter(Boolean);
+  const pr = !t.pr ? null : /^https:\/\//i.test(t.pr) ? el("a", { href: t.pr, target: "_blank", rel: "noopener noreferrer", text: prLabel(t.pr) }) : el("span", { text: "PR: " + t.pr });
   const menu = (t.menu || []).slice(0, 9);
   let answer = null;
   if (t.session && menu.length) {
@@ -242,7 +240,7 @@ function taskPage(v, id) {
       note(key + ":open"),
       note(key + ":done"),
     ),
-    facts.length ? el("p", { class: "facts" }, facts) : null,
+    pr ? el("p", { class: "facts" }, pr) : null,
     t.context ? el("section", { class: "block" }, el("h2", { text: "Context" }), el("p", { class: "context", text: t.context })) : null,
     history.length
       ? el("section", { class: "block" }, el("h2", { text: "History" }), el("ol", { class: "history" }, history.map((h) => el("li", {}, el("time", { datetime: h.at, text: when(h.at) }), el("span", { text: h.text })))))

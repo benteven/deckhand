@@ -84,12 +84,14 @@ func Group(t Task) int {
 	switch t.Status {
 	case "needs-you":
 		return 0
+	case "todo":
+		return 1
 	case "waiting":
-		return 2
-	case "done":
 		return 3
+	case "done":
+		return 4
 	}
-	return 1
+	return 2
 }
 
 func prioRank(p string) int {
