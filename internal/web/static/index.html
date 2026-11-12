@@ -10,20 +10,22 @@
 </head>
 <body>
 <header class="top">
-<nav class="switch" aria-label="View">
+<span class="brand">deckhand</span>
+<nav class="tabs" aria-label="View">
 <a id="navlist" href="#/">Tasks</a>
 <a id="navboard" href="#/board">Board</a>
 </nav>
 <span id="status" class="status" role="status" aria-live="polite"></span>
-<button id="ask" class="button" type="button">Ask <kbd id="askkey">⌘K</kbd></button>
+<button id="ask" class="askbtn" type="button">Ask <kbd id="askkey">⌘K</kbd></button>
 </header>
 <main id="app"></main>
 <dialog id="chat" class="chat" aria-labelledby="chattitle">
 <div class="chathead">
-<h2 id="chattitle">Assistant</h2>
-<button id="chatclose" class="button quiet" type="button" aria-label="Close">Esc</button>
+<h2 id="chattitle">Ask the assistant</h2>
+<button id="chatclose" class="textbtn quiet" type="button" aria-label="Close">Esc</button>
 </div>
 <ol id="chatlines" class="chatlines" aria-live="polite"></ol>
+<p id="chatwait" class="note wait" role="status"></p>
 <form id="chatform" class="chatform">
 <textarea id="chattext" class="field" rows="3" placeholder="A new thing or a question" aria-label="Message to the assistant"></textarea>
 <div class="chatfoot">

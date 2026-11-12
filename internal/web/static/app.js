@@ -7,6 +7,7 @@ const chat = document.getElementById("chat");
 const chatLines = document.getElementById("chatlines");
 const chatText = document.getElementById("chattext");
 const chatNote = document.getElementById("chatnote");
+const chatWait = document.getElementById("chatwait");
 const navList = document.getElementById("navlist");
 const navBoard = document.getElementById("navboard");
 
@@ -112,7 +113,7 @@ async function sendAnswer(key, target) {
   }
 }
 
-function answerForm(key, target, label) {
+function answerForm(key, target, label, extra) {
   const input = el("input", {
     type: "text",
     class: "field",
@@ -133,55 +134,110 @@ function answerForm(key, target, label) {
   return el(
     "form",
     { class: "answer", onsubmit: (e) => { e.preventDefault(); sendAnswer(key, target); } },
-    el("div", { class: "fieldrow" }, input, el("button", { class: "button primary", type: "submit", "data-key": key + ":send", disabled: !!state.busy[key], text: "Send" })),
+    el("div", { class: "fieldrow" }, input, el("button", { class: "button primary", type: "submit", "data-key": key + ":send", disabled: !!state.busy[key], text: "Send" }), extra),
     note(key),
   );
 }
 
 function button(text, key, onclick, cls) {
-  return el("button", { type: "button", class: "button" + (cls ? " " + cls : ""), "data-key": key, disabled: !!state.busy[key], onclick, text });
+  return el("button", { type: "button", class: cls || "textbtn", "data-key": key, disabled: !!state.busy[key], onclick, text });
 }
 
-function prioTag(p) {
-  return p === "urgent" || p === "high" ? el("span", { class: "tag " + p, text: p }) : null;
+function flag() {
+  return el("span", { class: "flag", "aria-hidden": "true" });
 }
 
-function taskRow(t) {
+function prioMark(p) {
+  return p === "urgent" || p === "high" ? el("span", { class: "prio " + p, role: "img", "aria-label": p, title: p }) : null;
+}
+
+function where(...parts) {
+  const kids = parts.filter(Boolean);
+  return kids.length ? el("span", { class: "where" }, kids) : null;
+}
+
+function choices(t, key) {
+  return el("ol", { class: "choices" }, (t.menu || []).slice(0, 9).map((c, i) => el("li", {}, el("button", {
+    type: "button",
+    class: "choice",
+    "data-key": key + ":c" + (i + 1),
+    disabled: !!state.busy[key],
+    onclick: () => act(key, "choice", { task: t.id, choice: i + 1 }, "Sent."),
+  }, el("span", { class: "num", text: String(i + 1) }), el("span", { class: "label", text: c })))));
+}
+
+function reply(t, key, screen) {
+  if (!t.session) return null;
+  if ((t.menu || []).length) return el("div", { class: "answer" }, screen && t.screen ? el("pre", { class: "screen", text: t.screen }) : null, choices(t, key), note(key));
+  return answerForm(key, { task: t.id }, "Your answer");
+}
+
+function needTask(t) {
   const key = "t:" + t.id;
   return el(
     "li",
-    { class: "row" },
+    { class: "needitem" },
+    flag(),
     el(
-      "a",
-      { class: "rowmain", href: "#/task/" + encodeURIComponent(t.id), "data-key": "a:" + t.id },
-      el("span", { class: "rowtop" }, el("span", { class: "title", text: t.title || t.id }), prioTag(t.prio), el("span", { class: "project", text: t.project_name || "" })),
-      el("span", { class: "need", text: line(t) }),
+      "div",
+      { class: "needbody" },
+      el("div", { class: "needhead" }, el("a", { class: "needtitle", href: "#/task/" + encodeURIComponent(t.id), "data-key": "a:" + t.id, text: t.title || t.id }), where(prioMark(t.prio), t.project_name && el("span", { text: t.project_name }))),
+      el("p", { class: "question", text: line(t) }),
+      reply(t, key, false),
+      plain(t) ? el("div", { class: "rowacts" }, button("Done", key, () => act(key, "done", { task: t.id })), note(key)) : null,
     ),
-    plain(t) ? el("div", { class: "rowside" }, button("Done", key, () => act(key, "done", { task: t.id })), note(key)) : null,
   );
 }
 
-function sessionRow(s) {
+function needSession(s) {
   const key = "s:" + s.id;
   return el(
     "li",
-    { class: "row session" },
+    { class: "needitem" },
+    flag(),
     el(
       "div",
-      { class: "rowmain" },
-      el("span", { class: "rowtop" }, el("span", { class: "title", text: s.name || s.id }), el("span", { class: "project", text: "session" })),
-      el("span", { class: "need", text: s.need }),
-      el("div", { class: "rowform" }, answerForm(key, { session: s.id }, "Answer " + (s.name || "the session")), button("Open", key + ":open", () => act(key + ":open", "open", { session: s.id }))),
+      { class: "needbody" },
+      el("div", { class: "needhead" }, el("span", { class: "needtitle", text: s.name || s.id }), where(el("span", { text: "session" }))),
+      el("p", { class: "question", text: s.need }),
+      answerForm(key, { session: s.id }, "Answer " + (s.name || "the session"), button("Open", key + ":open", () => act(key + ":open", "open", { session: s.id }))),
       note(key + ":open"),
     ),
   );
+}
+
+function needsBlock(items) {
+  if (!items.length) return el("p", { class: "calm", text: "Nothing needs you." });
+  return el(
+    "section",
+    { class: "needs", "aria-labelledby": "needshead" },
+    el("h1", { id: "needshead", class: "needshead" }, el("strong", { text: String(items.length) }), items.length === 1 ? " needs you" : " need you"),
+    el("ul", { class: "needlist" }, items),
+  );
+}
+
+function quietRow(t) {
+  const key = "t:" + t.id;
+  const said = plain(t) && t.status === "todo" ? "" : line(t);
+  return el(
+    "li",
+    { class: "row" },
+    el("a", { class: "rowtitle", href: "#/task/" + encodeURIComponent(t.id), "data-key": "a:" + t.id, text: t.title || t.id }),
+    where(prioMark(t.prio), t.project_name && el("span", { class: "project", text: t.project_name }), said && el("span", { class: "said", text: said })),
+    plain(t) ? el("span", { class: "rowacts" }, button("Done", key, () => act(key, "done", { task: t.id }))) : null,
+    plain(t) ? note(key) : null,
+  );
+}
+
+function heading(name, n) {
+  return el("h2", {}, name, n ? el("span", { class: "count", text: String(n) }) : null);
 }
 
 function section(name, rows, empty) {
   return el(
     "section",
     { class: "group" },
-    el("h2", {}, name, rows.length ? el("span", { class: "count", text: String(rows.length) }) : null),
+    heading(name, rows.length),
     rows.length ? el("ul", { class: "rows" }, rows) : el("p", { class: "empty", text: empty }),
   );
 }
@@ -189,10 +245,10 @@ function section(name, rows, empty) {
 function listPage(v) {
   const ts = v.tasks || [];
   return [
-    section("Needs you", [...ts.filter((t) => group(t) === 0).map(taskRow), ...(v.waiting || []).map(sessionRow)], "Nothing needs you."),
-    section("To do", ts.filter((t) => group(t) === 1).map(taskRow), "Nothing to do."),
-    section("Working", ts.filter((t) => group(t) === 2).map(taskRow), "Nothing is in work."),
-    section("Waiting on others", ts.filter((t) => group(t) === 3).map(taskRow), "Nothing waits on others."),
+    needsBlock([...ts.filter((t) => group(t) === 0).map(needTask), ...(v.waiting || []).map(needSession)]),
+    section("To do", ts.filter((t) => group(t) === 1).map(quietRow), "Nothing to do."),
+    section("Working", ts.filter((t) => group(t) === 2).map(quietRow), "Nothing is in work."),
+    section("Waiting on others", ts.filter((t) => group(t) === 3).map(quietRow), "Nothing waits on others."),
   ];
 }
 
@@ -203,15 +259,17 @@ const stages = [
 ];
 
 function card(t) {
+  const asks = t.status === "needs-you";
   return el(
     "li",
-    {},
+    { class: "card" + (asks ? " asks" : "") },
+    asks ? flag() : null,
     el(
-      "a",
-      { class: "card" + (t.status === "needs-you" ? " needs-you" : ""), href: "#/task/" + encodeURIComponent(t.id), "data-key": "b:" + t.id },
-      el("span", { class: "title", text: t.title || t.id }),
-      t.project_name ? el("span", { class: "project", text: t.project_name }) : null,
+      "div",
+      { class: "cardbody" },
+      el("a", { class: "cardtitle", href: "#/task/" + encodeURIComponent(t.id), "data-key": "b:" + t.id, text: t.title || t.id }),
       el("span", { class: "need", text: line(t) }),
+      where(prioMark(t.prio), t.project_name && el("span", { text: t.project_name })),
     ),
   );
 }
@@ -223,17 +281,23 @@ function boardPage(v) {
       const cards = ts.filter((t) => t.stage === stage).map(card);
       return el(
         "section",
-        { class: "column" },
-        el("h2", {}, name, cards.length ? el("span", { class: "count", text: String(cards.length) }) : null),
+        { class: "lane" },
+        heading(name, cards.length),
         cards.length ? el("ul", { class: "cards" }, cards) : el("p", { class: "empty", text: empty }),
       );
     })),
   ];
 }
 
-function prLabel(url) {
+function prNumber(url) {
   const m = /\/pull\/(\d+)/.exec(url);
-  return m ? "PR #" + m[1] : "PR";
+  return m ? "#" + m[1] : "link";
+}
+
+function prioWords(p) {
+  if (p === "urgent") return "urgent";
+  if (p === "high" || p === "low") return p + " priority";
+  return "";
 }
 
 function taskPage(v, id) {
@@ -241,34 +305,20 @@ function taskPage(v, id) {
   const t = (v.tasks || []).find((x) => x.id === id);
   if (!t) return [back, el("p", { class: "empty", text: "This task is not open. It may be done." })];
   const key = "t:" + t.id;
-  const meta = [t.project_name, (t.prio || "normal") + " prio", t.deadline && "due " + t.deadline, t.from && "from " + t.from].filter(Boolean).join(" · ");
-  const pr = !t.pr ? null : /^https:\/\//i.test(t.pr) ? el("a", { href: t.pr, target: "_blank", rel: "noopener noreferrer", text: prLabel(t.pr) }) : el("span", { text: "PR: " + t.pr });
-  const menu = (t.menu || []).slice(0, 9);
-  let answer = null;
-  if (t.session && menu.length) {
-    answer = el(
-      "div",
-      { class: "answer" },
-      t.screen ? el("pre", { class: "screen", text: t.screen }) : null,
-      el("div", { class: "choices" }, menu.map((c, i) => el("button", {
-        type: "button",
-        class: "button choice",
-        "data-key": key + ":c" + (i + 1),
-        disabled: !!state.busy[key],
-        onclick: () => act(key, "choice", { task: t.id, choice: i + 1 }, "Sent."),
-      }, el("span", { class: "num", text: String(i + 1) }), c))),
-      note(key),
-    );
-  } else if (t.session) {
-    answer = answerForm(key, { task: t.id }, "Your answer");
-  }
+  const meta = [t.project_name, prioWords(t.prio), t.deadline && "due " + t.deadline, t.from && "from " + t.from].filter(Boolean).join(", ");
+  const pr = !t.pr ? null : /^https:\/\//i.test(t.pr) ? el("a", { class: "code", href: t.pr, target: "_blank", rel: "noopener noreferrer", text: prNumber(t.pr) }) : el("span", { class: "code", text: t.pr });
   const history = (t.history || []).slice(-10).reverse();
+  const asks = t.status === "needs-you";
   return [
     back,
     el("h1", { class: "tasktitle", text: t.title || t.id }),
-    el("p", { class: "meta", text: meta }),
-    el("div", { class: "ask " + t.status }, el("span", { class: "asklabel", text: t.status === "needs-you" ? "It asks" : "State" }), el("p", { text: line(t) })),
-    answer,
+    meta ? el("p", { class: "meta", text: meta }) : null,
+    el(
+      "div",
+      { class: asks ? "asking" : "asking quiet" },
+      asks ? flag() : null,
+      el("div", { class: "needbody" }, el("p", { class: asks ? "question" : "said", text: line(t) }), reply(t, key, true)),
+    ),
     el(
       "div",
       { class: "actions" },
@@ -277,8 +327,8 @@ function taskPage(v, id) {
       note(key + ":open"),
       note(key + ":done"),
     ),
-    pr ? el("p", { class: "facts" }, pr) : null,
-    t.context ? el("section", { class: "block" }, el("h2", { text: "Context" }), el("p", { class: "context", text: t.context })) : null,
+    pr || t.branch ? el("p", { class: "facts" }, pr ? el("span", {}, "Pull request ", pr) : null, t.branch ? el("span", {}, "Branch ", el("span", { class: "code", text: t.branch })) : null) : null,
+    t.context ? el("p", { class: "context", text: t.context }) : null,
     history.length
       ? el("section", { class: "block" }, el("h2", { text: "History" }), el("ol", { class: "history" }, history.map((h) => el("li", {}, el("time", { datetime: h.at, text: when(h.at) }), el("span", { text: h.text })))))
       : null,
@@ -297,6 +347,7 @@ function render() {
   const sel = key && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
   const r = route();
   if (!r.task) state.back = r.board ? "#/board" : "#/";
+  document.body.dataset.view = r.task ? "task" : r.board ? "board" : "list";
   for (const [n, on] of [[navList, !r.task && !r.board], [navBoard, !!r.board]]) {
     if (on) n.setAttribute("aria-current", "page");
     else n.removeAttribute("aria-current");
@@ -320,10 +371,11 @@ function renderChat() {
   const k = JSON.stringify(lines);
   if (k === state.chatKey) return;
   state.chatKey = k;
+  chatWait.textContent = lines.length && lines[lines.length - 1].from === "you" ? "Waiting for the assistant" : "";
   const atEnd = chatLines.scrollHeight - chatLines.scrollTop - chatLines.clientHeight < 40;
   chatLines.replaceChildren(
     ...(lines.length
-      ? lines.map((l) => el("li", { class: "line " + (l.from === "you" ? "you" : "them") }, el("span", { class: "who", text: (l.from === "you" ? "You" : "Assistant") + " " + when(l.at) }), el("p", { text: l.text })))
+      ? lines.map((l) => el("li", { class: "line " + (l.from === "you" ? "you" : "them") }, el("span", { class: "who" }, el("span", { class: "name", text: l.from === "you" ? "You" : "Assistant" }), el("time", { datetime: l.at, text: when(l.at) })), el("p", { text: l.text })))
       : [el("li", { class: "empty", text: "Tell the assistant about a new thing, or ask a question." })]),
   );
   if (atEnd || !chat.open) chatLines.scrollTop = chatLines.scrollHeight;
