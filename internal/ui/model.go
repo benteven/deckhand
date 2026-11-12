@@ -288,6 +288,7 @@ type model struct {
 	updating     bool
 	restartDue   bool
 	notes        []string
+	reprompt     time.Time
 }
 
 func Run(version string) error {
@@ -1303,6 +1304,7 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 		entry.SessionID, entry.Name = next.SessionID, ""
 		if m.isAssistant(old) {
 			m.setAssistantID(next.SessionID)
+			m.reprompt = time.Now()
 			if n, ok := m.state.Names[old]; ok {
 				m.state.Names[next.SessionID] = n
 			}

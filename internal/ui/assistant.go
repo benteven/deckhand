@@ -22,6 +22,7 @@ const (
 	assistantRetry  = 60 * time.Second
 	handoffContext  = 60
 	maxNotes        = 50
+	repromptWait    = 2 * time.Second
 	assistantPrompt = "deckhand started you again. Read instructions.md and your notes, and create your hourly round again with CronCreate."
 )
 
@@ -97,7 +98,7 @@ func (m *model) keepAssistant(now time.Time) tea.Cmd {
 			return updatedMsg{}
 		})
 	}
-	if !m.restartDue || r.Kind != deck.Live || r.Busy || m.resuming[id] || m.handoffs[r.PaneID] != nil {
+	if !m.restartDue || !m.assistantFree(r) || waitsForIdle(r) {
 		return nil
 	}
 	m.restartDue = false
@@ -200,16 +201,26 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 	return m.deliverNotes()
 }
 
+func (m *model) assistantFree(r deck.Row) bool {
+	id := r.SessionID
+	return m.isAssistant(id) && r.Kind == deck.Live && !m.resuming[id] && m.handoffs[r.PaneID] == nil && m.userAway(r)
+}
+
+func (m *model) userAway(r deck.Row) bool {
+	return !(m.slot == r.PaneID && !m.focused) && !m.in.Events[r.SessionID].Menu()
+}
+
 func (m *model) deliverNotes() tea.Cmd {
-	id := m.state.Assistant.ID
-	r, ok := m.rowByID(id)
-	switch {
-	case len(m.notes) == 0 || !ok || r.Kind != deck.Live || m.resuming[id] || m.handoffs[r.PaneID] != nil:
-		return nil
-	case m.slot == r.PaneID && !m.focused, m.in.Events[id].Menu():
+	reprompt := !m.reprompt.IsZero() && time.Since(m.reprompt) >= repromptWait
+	r, ok := m.rowByID(m.state.Assistant.ID)
+	if (len(m.notes) == 0 && !reprompt) || !ok || !m.assistantFree(r) {
 		return nil
 	}
 	notes := m.notes
+	if reprompt {
+		notes = append([]string{assistantPrompt}, notes...)
+		m.reprompt = time.Time{}
+	}
 	m.notes = nil
 	return m.typeIn(r.PaneID, strings.Join(notes, " "))
 }

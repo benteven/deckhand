@@ -102,6 +102,9 @@ func (m *model) advanceHandoffs(now time.Time) tea.Cmd {
 				continue
 			}
 			if h.fresh {
+				if waitsForIdle(r) || !m.userAway(r) {
+					continue
+				}
 				delete(m.handoffs, pane)
 				m.hint = ""
 				cmds = append(cmds, m.freshAssistant(r, h.file))
