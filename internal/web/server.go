@@ -119,8 +119,12 @@ func (s *Server) match(token string) bool {
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cache-Control", "no-store")
 	if t := r.URL.Query().Get("token"); s.match(t) {
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: t, Path: "/", SameSite: http.SameSiteStrictMode})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
 	page, err := static.ReadFile("static/index.html")
 	if err != nil {
@@ -128,7 +132,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	w.Write(page)
 }
 
