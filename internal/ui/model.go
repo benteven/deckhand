@@ -1163,7 +1163,12 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	delete(m.batch, msg.id)
 	if msg.err != nil {
 		if msg.req != "" {
-			return m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
+			reply := m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
+			if i, ok := m.taskOf(msg.id); ok {
+				m.tasks[i].Session, m.tasks[i].Status = "", "todo"
+				return tea.Batch(m.saveTasks(), reply)
+			}
+			return reply
 		}
 		m.err = msg.err
 		if msg.background {

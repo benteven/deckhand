@@ -325,20 +325,27 @@ func (m *model) pageChoice(a web.Action) tea.Cmd {
 	if !m.in.Events[id].Menu() && !r.Asking {
 		return replyTo(a, errors.New("the session shows no menu"))
 	}
-	if m.userIn(r) || m.typing[r.PaneID] {
+	if m.resuming[id] || m.handoffs[r.PaneID] != nil || m.typing[r.PaneID] || m.userIn(r) {
 		return replyTo(a, errors.New("the session is in use in deckhand; try again soon"))
 	}
+	if m.typing == nil {
+		m.typing = map[string]bool{}
+	}
+	m.typing[r.PaneID] = true
 	t, pane, n := m.ops.T, r.PaneID, a.Choice
+	done := func(err error) tea.Msg {
+		return typedMsg{pane: pane, err: err, then: func(err error) tea.Cmd { return replyTo(a, err) }}
+	}
 	return func() tea.Msg {
 		out, err := t.Run("capture-pane", "-p", "-J", "-t", pane)
 		if err != nil {
-			return replyTo(a, err)
+			return done(err)
 		}
 		if len(typing.Choices(out)) < n {
-			return replyTo(a, errors.New("the session shows no such choice"))
+			return done(errors.New("the session shows no such choice"))
 		}
 		_, err = t.Run("send-keys", "-t", pane, strconv.Itoa(n))
-		return replyTo(a, err)
+		return done(err)
 	}
 }
 
