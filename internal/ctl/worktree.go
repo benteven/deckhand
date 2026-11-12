@@ -35,6 +35,14 @@ func git(dir string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+func TopLevel(dir string) string {
+	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	return top
+}
+
 func Create(cwd, name string) (dir, repo, branch string, err error) {
 	out, err := git(cwd, "rev-parse", "--show-toplevel", "--show-prefix")
 	if err != nil {

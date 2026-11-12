@@ -23,6 +23,7 @@ import (
 	"github.com/benteven/deckhand/internal/live"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/review"
+	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
@@ -1640,6 +1641,7 @@ func (m *model) saveState() tea.Cmd {
 	sv.mu.Lock()
 	st := m.state
 	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
+	st.Models, st.Roles = maps.Clone(st.Models), maps.Clone(st.Roles)
 	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
 	sv.state = st
 	sv.mu.Unlock()
@@ -1661,15 +1663,30 @@ func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
 		m.state.Accounts[id] = account
 	}
 	account = m.launchAccount(id, account)
-	ops := m.ops
+	start := m.starter(m.ops, id)
 	return func() tea.Msg {
-		pane, err := ops.Start(cwd, id, name, false, account, prompt)
+		pane, err := start(deck.Launch{Cwd: cwd, SessionID: id, Name: name, Account: account, Prompt: prompt})
 		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err}
 	}
 }
 
+func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (string, error) {
+	home, role, model := m.home, m.state.Roles[id], m.modelFor(id)
+	return func(l deck.Launch) (string, error) {
+		l.Model = model
+		if role != "" {
+			r, err := roles.Find(home, ctl.TopLevel(l.Cwd), role)
+			if err != nil {
+				return "", err
+			}
+			l.System = r.Body
+		}
+		return ops.Start(l)
+	}
+}
+
 func (m *model) resume(r deck.Row) tea.Cmd {
-	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
+	start, account := m.starter(m.ops, r.SessionID), m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
 	name, home := m.state.Names[r.SessionID], m.home
 	sub, isSub := m.state.SubOf(r.SessionID)
 	queued := slices.Contains(m.state.Cleanups, r.SessionID)
@@ -1685,7 +1702,7 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 		if st, ok, _ := review.Load(home, r.SessionID); ok {
 			rev = &st
 		}
-		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, prompt)
+		pane, err := start(deck.Launch{Cwd: r.Cwd, SessionID: r.SessionID, Name: name, Account: account, Prompt: prompt, Resume: true})
 		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
 	}
 }

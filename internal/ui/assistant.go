@@ -49,6 +49,13 @@ func (m *model) isAssistant(id string) bool {
 	return m.ops.AssistantID != "" && id == m.ops.AssistantID
 }
 
+func (m *model) modelFor(id string) string {
+	if m.isAssistant(id) {
+		return m.ops.Cfg.AssistantModel
+	}
+	return m.state.Models[id]
+}
+
 func (m *model) setAssistantID(id string) {
 	m.state.Assistant.ID = id
 	if m.ops.Cfg.Assistant {

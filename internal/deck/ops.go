@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,12 +34,23 @@ type Ops struct {
 	Rules              string
 }
 
-func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt string) (string, error) {
+type Launch struct {
+	Cwd, SessionID, Name, Account, Prompt string
+	Resume                                bool
+	ForkOf                                string
+	ForkCwd                               string
+	Model                                 string
+	System                                string
+}
+
+func (o Ops) Start(l Launch) (string, error) {
+	cwd, sessionID, account, prompt := l.Cwd, l.SessionID, l.Account, l.Prompt
 	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("folder not found: %s", cwd)
 	}
 	args := []string{paths.ClaudeCommand()}
 	envArgs := []string{"env", ctl.SessionEnv + "=" + sessionID}
+	configDir := paths.ClaudeHome()
 	if account != "" {
 		if !accounts.LoggedIn(o.Home, account) {
 			return "", fmt.Errorf("account %s is not logged in, press A to log in", account)
@@ -47,16 +59,26 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 		if err != nil {
 			return "", err
 		}
+		configDir = dir
 		envArgs = append(envArgs, "CLAUDE_CONFIG_DIR="+dir)
 	}
 	args = append(envArgs, args...)
-	if resume {
+	switch {
+	case l.ForkOf != "":
+		if err := CopyTranscript(configDir, l.ForkCwd, cwd, l.ForkOf); err != nil {
+			return "", err
+		}
+		args = append(args, "--resume", l.ForkOf, "--fork-session", "--session-id", sessionID)
+	case l.Resume:
 		args = append(args, "--resume", sessionID)
-	} else {
+	default:
 		args = append(args, "--session-id", sessionID)
 	}
-	if name != "" {
-		args = append(args, "--name", name)
+	if l.Name != "" {
+		args = append(args, "--name", l.Name)
+	}
+	if l.Model != "" {
+		args = append(args, "--model", l.Model)
 	}
 	args = append(args, "--settings", o.HooksPath)
 	args = append(args, o.Cfg.ClaudeArgs...)
@@ -71,8 +93,8 @@ func (o Ops) Start(cwd, sessionID, name string, resume bool, account, prompt str
 		)
 	} else {
 		args = append(args, "--plugin-dir="+o.PluginDir)
-		if o.Rules != "" {
-			args = append(args, "--append-system-prompt="+o.Rules)
+		if system := strings.Join(slices.DeleteFunc([]string{o.Rules, l.System}, func(s string) bool { return s == "" }), "\n\n"); system != "" {
+			args = append(args, "--append-system-prompt="+system)
 		}
 	}
 	if prompt != "" {

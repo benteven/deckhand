@@ -12,16 +12,18 @@ import (
 )
 
 type Config struct {
-	Prefix     string   `json:"prefix"`
-	ClaudeArgs []string `json:"claude_args"`
-	ListWidth  int      `json:"list_width"`
-	Assistant  bool     `json:"assistant"`
+	Prefix         string   `json:"prefix"`
+	ClaudeArgs     []string `json:"claude_args"`
+	ListWidth      int      `json:"list_width"`
+	Assistant      bool     `json:"assistant"`
+	AssistantModel string   `json:"assistant_model"`
 }
 
 const (
-	DefaultListWidth = 36
-	MinListWidth     = 24
-	MaxListWidth     = 100
+	DefaultListWidth      = 36
+	DefaultAssistantModel = "sonnet"
+	MinListWidth          = 24
+	MaxListWidth          = 100
 )
 
 func ClampListWidth(w int) int {
@@ -109,6 +111,8 @@ type State struct {
 	Accounts  map[string]string    `json:"accounts,omitempty"`
 	Limits    map[string]time.Time `json:"limits,omitempty"`
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
+	Models    map[string]string    `json:"models,omitempty"`
+	Roles     map[string]string    `json:"roles,omitempty"`
 	Assistant Assistant            `json:"assistant"`
 	Subs      []Subsession         `json:"subs,omitempty"`
 	Cleanups  []string             `json:"cleanups,omitempty"`
@@ -142,9 +146,12 @@ func readJSON(path string, v any) error {
 }
 
 func LoadConfig(dir string) (Config, error) {
-	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth}
+	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel}
 	if err := readJSON(filepath.Join(dir, "config.json"), &c); err != nil {
-		return Config{Prefix: "C-b", ListWidth: DefaultListWidth}, err
+		return Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel}, err
+	}
+	if c.AssistantModel == "" {
+		c.AssistantModel = DefaultAssistantModel
 	}
 	if c.Prefix == "" || strings.EqualFold(c.Prefix, "C-j") || strings.EqualFold(c.Prefix, "C-k") {
 		c.Prefix = "C-b"

@@ -490,6 +490,7 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 		}
 		id = fresh
 	}
+	start := m.starter(ops, r.SessionID)
 	run := func() tea.Msg {
 		if r.Job != "" {
 			if err := ops.StopJob(r.Job, from); err != nil {
@@ -499,7 +500,7 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 		if err := ops.Stop(r.PaneID, r.Busy); err != nil {
 			return restartedMsg{row: r, err: err, stopFailed: true}
 		}
-		pane, err := ops.Start(r.Cwd, id, name, fresh == "", account, prompt)
+		pane, err := start(deck.Launch{Cwd: r.Cwd, SessionID: id, Name: name, Account: account, Prompt: prompt, Resume: fresh == ""})
 		return restartedMsg{row: r, id: id, pane: pane, err: err}
 	}
 	return tea.Sequence(m.showSelected(), run)
