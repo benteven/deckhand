@@ -517,6 +517,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case taskCreatedMsg:
 		return m, m.taskCreated(msg)
 	case roleFoundMsg:
+		if msg.req.Op == "project-mark" {
+			return m, m.projectMarked(msg)
+		}
 		return m, m.roleFound(msg)
 	case queueNamedMsg:
 		return m, m.queueNamed(msg)

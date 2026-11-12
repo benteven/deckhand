@@ -19,6 +19,7 @@ import (
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/typing"
@@ -365,6 +366,10 @@ func (m *model) assistantKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *model) setAssistant(on bool) tea.Cmd {
 	if on {
 		if err := ctl.WriteInstructions(m.ops.AssistantDir); err != nil {
+			m.err = err
+			return nil
+		}
+		if err := roles.WriteDefaults(m.home); err != nil {
 			m.err = err
 			return nil
 		}

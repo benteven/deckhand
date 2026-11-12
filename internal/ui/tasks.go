@@ -30,8 +30,9 @@ type taskCreatedMsg struct {
 }
 
 const (
-	taskRole  = "task"
-	taskModel = "opus"
+	taskRole     = "task"
+	taskModel    = "opus"
+	projectModel = "opus"
 )
 
 var (
@@ -254,24 +255,27 @@ func (m *model) projectRequest(req ctl.Request) tea.Cmd {
 	}
 	switch req.Op {
 	case "project-mark":
-		if _, ok := m.rowByID(req.Target); !ok {
+		r, ok := m.rowByID(req.Target)
+		if !ok {
 			return fail("no session %s", req.Target)
 		}
 		if m.isAssistant(req.Target) {
 			return fail("the assistant cannot be a project")
 		}
-		var told tea.Cmd
-		if !m.projectOf(req.Target) {
-			m.state.Projects = append(m.state.Projects, req.Target)
-			m.tellProject(req.Target, "[deckhand] you are a project now. "+projectNotesText(m.notesPath(req.Target)))
-			told = m.deliverProjectNotes()
+		home, cwd := m.home, r.Cwd
+		return func() tea.Msg {
+			role, err := roles.Find(home, ctl.TopLevel(cwd), projectRole)
+			return roleFoundMsg{req: req, role: role, err: err}
 		}
-		return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "marked"}), told)
 	case "project-unmark":
 		if !m.projectOf(req.Target) {
 			return fail("%s is not a project", req.Target)
 		}
 		m.state.Projects = slices.DeleteFunc(m.state.Projects, func(id string) bool { return id == req.Target })
+		if m.state.Roles[req.Target] == projectRole {
+			delete(m.state.Roles, req.Target)
+			delete(m.state.Models, req.Target)
+		}
 		return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "unmarked"}))
 	case "project-list":
 		var lines []string
@@ -287,6 +291,32 @@ func (m *model) projectRequest(req ctl.Request) tea.Cmd {
 		return m.answer(req.ID, ctl.Reply{Out: strings.Join(lines, "\n")})
 	}
 	return fail("unknown request %s", req.Op)
+}
+
+func (m *model) projectMarked(msg roleFoundMsg) tea.Cmd {
+	id := msg.req.Target
+	if _, ok := m.rowByID(id); !ok {
+		return m.answer(msg.req.ID, ctl.Reply{Err: fmt.Sprintf("no session %s", id)})
+	}
+	model := projectModel
+	if msg.err == nil && msg.role.Model != "" {
+		model = msg.role.Model
+	}
+	if m.state.Roles == nil {
+		m.state.Roles = map[string]string{}
+	}
+	if m.state.Models == nil {
+		m.state.Models = map[string]string{}
+	}
+	m.state.Roles[id], m.state.Models[id] = projectRole, model
+	var told tea.Cmd
+	if !m.projectOf(id) {
+		m.state.Projects = append(m.state.Projects, id)
+		text := strings.TrimSpace("[deckhand] you are a project now.\n\n" + msg.role.Body)
+		m.tellProject(id, text+"\n\n"+projectNotesText(m.notesPath(id)))
+		told = m.deliverProjectNotes()
+	}
+	return tea.Batch(m.saveState(), m.answer(msg.req.ID, ctl.Reply{Out: "marked"}), told)
 }
 
 func (m *model) startTask(req ctl.Request) tea.Cmd {
