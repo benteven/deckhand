@@ -18,10 +18,16 @@ type State struct {
 	At       time.Time `json:"at"`
 	PromptAt time.Time `json:"prompt_at"`
 	Agents   []string  `json:"agents,omitempty"`
+	Need     string    `json:"need,omitempty"`
+	Message  string    `json:"message,omitempty"`
 }
 
 func (s State) Waiting() bool {
 	return s.Event == "Notification" || s.Event == "Stop"
+}
+
+func (s State) Menu() bool {
+	return s.Event == "Notification" && (s.Need == "permission_prompt" || s.Need == "elicitation_dialog")
 }
 
 func path(dir, sessionID string) (string, error) {
@@ -64,6 +70,8 @@ func (s *State) record(event string, now time.Time) bool {
 	}
 	s.Event = event
 	s.At = now
+	s.Need = ""
+	s.Message = ""
 	if event == "UserPromptSubmit" {
 		s.PromptAt = now
 	}
@@ -124,6 +132,8 @@ type hookInput struct {
 	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
 	AgentID   string `json:"agent_id"`
+	Message   string `json:"message"`
+	NotifType string `json:"notification_type"`
 	Tasks     *[]struct {
 		ID     string `json:"id"`
 		Type   string `json:"type"`
@@ -163,6 +173,10 @@ func (s *State) hook(in hookInput, now time.Time) bool {
 	}
 	if !s.record(in.Event, now) {
 		return false
+	}
+	if in.Event == "Notification" {
+		s.Need = in.NotifType
+		s.Message = in.Message
 	}
 	if in.Event == "Stop" && in.Tasks != nil {
 		s.Agents = nil

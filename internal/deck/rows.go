@@ -41,6 +41,10 @@ type Row struct {
 	LastInteraction time.Time
 	Agents          []transcript.Agent
 	Num             int
+	Assistant       bool
+	Paused          bool
+	Parent          string
+	Orphan          string
 }
 
 type Inputs struct {
@@ -133,6 +137,29 @@ func Build(in Inputs) (active, suspended []Row) {
 		}
 		return active[i].LastInteraction.After(active[j].LastInteraction)
 	})
+	if id := in.State.Assistant.ID; in.State.Assistant.Paused && id != "" && !seen[id] {
+		for _, f := range in.Files {
+			if f.SessionID != id {
+				continue
+			}
+			seen[id] = true
+			sum := in.Summaries[id]
+			last := sum.LastUsed
+			if last.IsZero() {
+				last = f.ModTime
+			}
+			active = append(active, Row{
+				SessionID:       id,
+				Name:            name(in.State, "", live.Session{}, id, sum),
+				Cwd:             sum.Cwd,
+				TranscriptPath:  f.Path,
+				Kind:            Suspended,
+				Summary:         sum,
+				LastInteraction: last,
+			})
+		}
+	}
+	active = arrange(in.State, active)
 
 	for _, f := range in.Files {
 		if seen[f.SessionID] {
@@ -157,6 +184,72 @@ func Build(in Inputs) (active, suspended []Row) {
 		return suspended[i].LastInteraction.After(suspended[j].LastInteraction)
 	})
 	return active, suspended
+}
+
+func arrange(state store.State, rows []Row) []Row {
+	isActive := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		isActive[r.SessionID] = true
+	}
+	children := map[string][]int{}
+	child := map[string]bool{}
+	byID := make(map[string]int, len(rows))
+	for i, r := range rows {
+		byID[r.SessionID] = i
+	}
+	for _, sub := range state.Subs {
+		i, ok := byID[sub.ID]
+		if !ok {
+			continue
+		}
+		if isActive[sub.Parent] && sub.Parent != sub.ID {
+			rows[i].Parent = sub.Parent
+			children[sub.Parent] = append(children[sub.Parent], i)
+			child[sub.ID] = true
+		} else {
+			rows[i].Orphan = name(state, "", live.Session{}, sub.Parent, transcript.Summary{})
+		}
+	}
+	out := make([]Row, 0, len(rows))
+	emit := func(i int) {
+		out = append(out, rows[i])
+		for _, c := range children[rows[i].SessionID] {
+			out = append(out, rows[c])
+		}
+	}
+	if i, ok := byID[state.Assistant.ID]; ok && state.Assistant.ID != "" && !child[state.Assistant.ID] {
+		rows[i].Assistant = true
+		rows[i].Paused = state.Assistant.Paused
+		emit(i)
+	}
+	for i, r := range rows {
+		if child[r.SessionID] || rows[i].Assistant {
+			continue
+		}
+		emit(i)
+	}
+	return out
+}
+
+func Family(active []Row, id string) []Row {
+	parent := id
+	for _, r := range active {
+		if r.SessionID == id && r.Parent != "" {
+			parent = r.Parent
+		}
+	}
+	var out []Row
+	for _, r := range active {
+		if r.SessionID == parent {
+			out = append([]Row{r}, out...)
+		} else if r.Parent == parent {
+			out = append(out, r)
+		}
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
 }
 
 func name(state store.State, entryName string, ls live.Session, id string, sum transcript.Summary) string {

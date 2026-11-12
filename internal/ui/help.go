@@ -21,11 +21,12 @@ func helpSections(prefix string) []helpSection {
 			{p, "Focus the list"},
 			{"ctrl-j / ctrl-k", "Next or previous session"},
 			{"ctrl-q / ctrl-shift-q", "Next or previous in the list like Cmd-Tab; the pick moves to the top"},
+			{"ctrl-\\", "Next session in this family: the parent and its subsessions"},
 			{p + " 1-9", "Go to session 1 to 9"},
 			{p + " < / >", "Narrower or wider list"},
 			{p + " ?", "This help"},
 			{p + " " + p, "Same as ctrl-q"},
-			{p + " ctrl-j / k / q", "Send that key to Claude Code"},
+			{p + " ctrl-j / k / q / \\", "Send that key to Claude Code"},
 		}},
 		{"In the list", [][2]string{
 			{"↑↓ / j k", "Move; the right side follows"},

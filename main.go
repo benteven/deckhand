@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/preview"
@@ -60,6 +62,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "session":
+		runCtl("session", os.Args[2:])
+	case "sub":
+		runCtl("sub", os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "ui":
@@ -183,6 +189,14 @@ func setup() (tmux.Client, store.Config, string, error) {
 	if err := os.WriteFile(filepath.Join(home, "hooks.json"), events.HookSettings(exe), 0o644); err != nil {
 		return tmux.Client{}, cfg, "", err
 	}
+	if err := ctl.WritePlugins(home, exe); err != nil {
+		return tmux.Client{}, cfg, "", err
+	}
+	if cfg.Assistant {
+		if err := writeInstructions(filepath.Join(home, "assistant")); err != nil {
+			return tmux.Client{}, cfg, "", err
+		}
+	}
 	client := tmux.Client{Socket: paths.Socket(), Conf: conf}
 	if _, err := client.Run("list-sessions"); err == nil {
 		if _, err := client.Run("source-file", conf); err != nil {
@@ -190,6 +204,21 @@ func setup() (tmux.Client, store.Config, string, error) {
 		}
 	}
 	return client, cfg, exe, nil
+}
+
+func writeInstructions(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "instructions.md"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(ctl.Instructions)
+	return errors.Join(werr, f.Close())
 }
 
 func reload() error {

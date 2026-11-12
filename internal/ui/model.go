@@ -11,12 +11,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"uuid"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/gh"
@@ -142,6 +142,7 @@ type refreshMsg struct {
 	geoOK     bool
 	accounts  []accounts.Account
 	reviews   map[string]review.State
+	requests  []ctl.Request
 	err       error
 }
 
@@ -159,6 +160,8 @@ type startedMsg struct {
 	id, cwd, name, pane string
 	err                 error
 	rev                 *review.State
+	req, out            string
+	background          bool
 }
 
 type errMsg struct{ err error }
@@ -262,6 +265,7 @@ type model struct {
 	handoff        *handoffDialog
 	help           *helpScreen
 	accounts       *accountDialog
+	cleanup        *cleanupDialog
 
 	switches      map[string]bool
 	continueAfter map[string]bool
@@ -278,6 +282,14 @@ type model struct {
 	gone      map[string]bool
 	quitting  bool
 	inDialog  bool
+	requests  map[string]time.Time
+
+	assistantTry time.Time
+	updating     bool
+	restartDue   bool
+	notes        []string
+	reprompt     time.Time
+	typing       map[string]bool
 }
 
 func Run(version string) error {
@@ -301,6 +313,14 @@ func Run(version string) error {
 	styles.Focused.Prompt = yellow
 	styles.Blurred.Prompt = yellow
 	search.SetStyles(styles)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	rules, assistantID := "", ""
+	if cfg.Assistant {
+		rules, assistantID = ctl.Rules(), state.Assistant.ID
+	}
 	m := &model{
 		search:   search,
 		index:    transcript.NewIndex(),
@@ -311,6 +331,13 @@ func Run(version string) error {
 			Cfg:       cfg,
 			HooksPath: filepath.Join(home, "hooks.json"),
 			Home:      home,
+
+			Exe:                exe,
+			PluginDir:          filepath.Join(home, "plugin"),
+			AssistantPluginDir: filepath.Join(home, "plugin-assistant"),
+			AssistantDir:       filepath.Join(home, "assistant"),
+			AssistantID:        assistantID,
+			Rules:              rules,
 		},
 		reader:      reader,
 		home:        home,
@@ -320,7 +347,6 @@ func Run(version string) error {
 		want:        &slotWant{},
 		saver:       &stateSaver{},
 		starts:      &pidStarts{at: map[paneProc]time.Time{}},
-		focused:     true,
 		prs:         loadedPRs(saved),
 		prSem:       make(chan struct{}, prParallel),
 		prSaver:     &prSaver{},
@@ -336,7 +362,7 @@ func Run(version string) error {
 
 func (m *model) Init() tea.Cmd {
 	home := m.home
-	return tea.Batch(m.refresh(), m.dialogFlag(), func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
+	return tea.Batch(m.refresh(), m.dialogFlag(), m.nextCleanup(), func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -407,7 +433,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, next
 		}
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), m.apply(msg))
+		prev := m.in.Events
+		applied := m.apply(msg)
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()))
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -430,8 +458,20 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.gotTextHits(msg)
 	case startedMsg:
 		return m, m.started(msg)
+	case typedMsg:
+		return m, m.typed(msg)
+	case worktreeRemovedMsg:
+		return m, m.worktreeRemoved(msg)
+	case subCreatedMsg:
+		return m, m.subCreated(msg)
+	case cleanupMsg:
+		return m, m.queueCleanup(msg.id)
 	case restartedMsg:
 		return m, m.restarted(msg)
+	case updatedMsg:
+		m.updated(msg)
+	case pausedMsg:
+		return m, m.paused(msg)
 	case takenOverMsg:
 		return m, m.tookOver(msg)
 	case trashedMsg:
@@ -466,6 +506,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Text == tmux.NextKey || msg.Text == tmux.PrevKey {
 			return m, m.switchLive(msg.Text == tmux.NextKey)
 		}
+		if msg.Text == tmux.FamilyKey {
+			return m, m.switchFamily()
+		}
 		if msg.Text == tmux.LastKey || msg.Text == tmux.BackKey {
 			return m, m.toggleLast(msg.Text == tmux.BackKey)
 		}
@@ -473,6 +516,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		if m.quitting {
 			return m, nil
+		}
+		if m.cleanup != nil {
+			return m, m.cleanupKey(msg)
 		}
 		if m.prompt != nil {
 			return m, m.promptKey(msg)
@@ -567,6 +613,12 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 		if !ok || (msg.String() == "s" && r.Kind != deck.Live && r.Kind != deck.Stale) {
 			return nil
 		}
+		if msg.String() == "s" && m.isAssistant(r.SessionID) {
+			if r.Kind != deck.Live || m.resuming[r.SessionID] {
+				return nil
+			}
+			return m.pauseAssistant(r)
+		}
 		if msg.String() == "s" && r.Kind == deck.Stale {
 			return m.dropStale(r)
 		}
@@ -591,6 +643,10 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "d":
 		r, ok := m.current()
 		if !ok || r.Kind != deck.Suspended || m.resuming[r.SessionID] {
+			return nil
+		}
+		if r.Assistant {
+			m.hint = "The assistant cannot be deleted"
 			return nil
 		}
 		m.del = &deleteDialog{row: r}
@@ -661,7 +717,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) dialogOpen() bool {
-	return m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
+	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
 }
 
 func (m *model) liveRows() []deck.Row {
@@ -699,6 +755,22 @@ func (m *model) switchLive(next bool) tea.Cmd {
 		i = len(rows) - 1
 	}
 	return m.switchTo(rows[i])
+}
+
+func (m *model) switchFamily() tea.Cmd {
+	if m.quitting || m.dialogOpen() {
+		return nil
+	}
+	id := m.selected
+	if i := slices.IndexFunc(m.active, func(r deck.Row) bool { return r.PaneID == m.slot && m.slot != "" }); i >= 0 {
+		id = m.active[i].SessionID
+	}
+	family := slices.DeleteFunc(deck.Family(m.active, id), func(r deck.Row) bool { return r.Kind != deck.Live })
+	if len(family) < 2 {
+		return nil
+	}
+	i := slices.IndexFunc(family, func(r deck.Row) bool { return r.SessionID == id })
+	return m.switchTo(family[(i+1)%len(family)])
 }
 
 func (m *model) jump(n int) tea.Cmd {
@@ -814,20 +886,37 @@ func (m *model) confirmRename(d *renameDialog) tea.Cmd {
 	if i < 0 || m.shown()[i].Kind != deck.Live || m.shown()[i].PaneID != d.pane {
 		return m.saveState()
 	}
-	d.busy = m.shown()[i].Busy
+	return m.suspend(m.shown()[i], "")
+}
+
+func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 	var entry store.ActiveEntry
 	for _, e := range m.state.Active {
-		if e.SessionID == d.id {
+		if e.SessionID == r.SessionID {
 			entry = e
 		}
 	}
-	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == d.id })
-	m.markEnding(d.id)
+	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == r.SessionID })
+	m.markEnding(r.SessionID)
 	m.rebuild()
-	ops, pane, busy := m.ops, d.pane, d.busy
+	ops, pane, busy, home := m.ops, r.PaneID, r.Busy, m.home
+	_, sub := m.state.SubOf(r.SessionID)
 	stop := func() tea.Msg {
-		if err := ops.Stop(pane, busy); err != nil {
+		err := ops.Stop(pane, busy)
+		if req != "" {
+			rep := ctl.Reply{Out: "closed"}
+			if err != nil {
+				rep = ctl.Reply{Err: err.Error()}
+			}
+			if aerr := ctl.Answer(home, req, rep); aerr != nil && err == nil {
+				return errMsg{aerr}
+			}
+		}
+		if err != nil {
 			return stopFailedMsg{entry: entry, err: err}
+		}
+		if sub {
+			return cleanupMsg{r.SessionID}
 		}
 		return nil
 	}
@@ -855,6 +944,10 @@ func (m *model) endDead(panes []tmux.Pane, slotPane string) tea.Cmd {
 		}
 		inSlot = inSlot || p.ID == slotPane
 		m.markEnding(p.SessionID)
+		if m.isAssistant(p.SessionID) {
+			kills = append(kills, m.assistantDied(p.ID))
+			continue
+		}
 		kills = append(kills, m.tmux("kill-pane", "-t", p.ID))
 	}
 	if len(kills) == 0 {
@@ -972,6 +1065,11 @@ func (m *model) enter() tea.Cmd {
 		}
 		m.resuming[r.SessionID] = true
 		delete(m.ending, r.SessionID)
+		if m.isAssistant(r.SessionID) && m.state.Assistant.Paused {
+			m.state.Assistant.Paused = false
+			m.assistantTry = time.Now()
+			return tea.Batch(m.saveState(), m.resume(r))
+		}
 		return m.resume(r)
 	}
 	return nil
@@ -982,7 +1080,13 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	inBatch := m.batch[msg.id]
 	delete(m.batch, msg.id)
 	if msg.err != nil {
+		if msg.req != "" {
+			return m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
+		}
 		m.err = msg.err
+		if msg.background {
+			return nil
+		}
 		if inBatch {
 			return m.finishBatch()
 		}
@@ -991,7 +1095,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.rev != nil {
 		m.reviewStarted(msg.id, *msg.rev)
 	}
-	m.setMode(modeActive)
+	if msg.req == "" && !msg.background {
+		m.setMode(modeActive)
+	}
 	entry := store.ActiveEntry{SessionID: msg.id, Cwd: msg.cwd, Name: msg.name, LastInteraction: time.Now()}
 	if i := slices.IndexFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == msg.id }); i >= 0 {
 		if inBatch {
@@ -1006,6 +1112,14 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	m.in.Panes[msg.id] = msg.pane
+	if msg.req != "" {
+		m.rebuild()
+		return tea.Batch(m.saveState(), m.answer(msg.req, ctl.Reply{Out: msg.out}))
+	}
+	if msg.background {
+		m.rebuild()
+		return m.saveState()
+	}
 	if inBatch {
 		m.rebuild()
 		return tea.Batch(m.saveState(), m.finishBatch())
@@ -1037,7 +1151,7 @@ func (m *model) finishBatch() tea.Cmd {
 func (m *model) staleRows() []deck.Row {
 	var rows []deck.Row
 	for _, r := range m.active {
-		if r.Kind == deck.Stale {
+		if r.Kind == deck.Stale && !m.isAssistant(r.SessionID) {
 			rows = append(rows, r)
 		}
 	}
@@ -1145,6 +1259,7 @@ func (m *model) refresh() tea.Cmd {
 		}
 		msg.accounts = accounts.List(home, claudeHome)
 		msg.reviews = review.LoadAll(home)
+		msg.requests = ctl.Pending(home)
 		if save {
 			reader.Save()
 		}
@@ -1214,6 +1329,14 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 		old := p.SessionID
 		entry := &m.state.Active[k]
 		entry.SessionID, entry.Name = next.SessionID, ""
+		m.remapSubs(old, next.SessionID)
+		if m.isAssistant(old) {
+			m.setAssistantID(next.SessionID)
+			m.reprompt = time.Now()
+			if n, ok := m.state.Names[old]; ok {
+				m.state.Names[next.SessionID] = n
+			}
+		}
 		if next.Cwd != "" {
 			entry.Cwd = next.Cwd
 		}
@@ -1345,6 +1468,9 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 func (m *model) rebuild() (moved bool) {
 	before := m.selected
 	m.in.State = m.state
+	if !m.ops.Cfg.Assistant {
+		m.in.State.Assistant = store.Assistant{}
+	}
 	m.active, m.suspended = deck.Build(m.in)
 	m.labelReviews()
 	if d := m.rename; d != nil {
@@ -1500,7 +1626,10 @@ func (m *model) tmux(args ...string) tea.Cmd {
 func (m *model) saveState() tea.Cmd {
 	sv, home := m.saver, m.home
 	sv.mu.Lock()
-	sv.state = store.State{Names: maps.Clone(m.state.Names), Active: slices.Clone(m.state.Active), Account: m.state.Account, Accounts: maps.Clone(m.state.Accounts), Limits: maps.Clone(m.state.Limits), Fallbacks: maps.Clone(m.state.Fallbacks)}
+	st := m.state
+	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
+	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
+	sv.state = st
 	sv.mu.Unlock()
 	return func() tea.Msg {
 		sv.mu.Lock()
@@ -1512,8 +1641,7 @@ func (m *model) saveState() tea.Cmd {
 	}
 }
 
-func (m *model) start(cwd, account string) tea.Cmd {
-	id := uuid.NewV4().String()
+func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
 	if account != m.state.Account {
 		if m.state.Accounts == nil {
 			m.state.Accounts = map[string]string{}
@@ -1523,20 +1651,29 @@ func (m *model) start(cwd, account string) tea.Cmd {
 	account = m.launchAccount(id, account)
 	ops := m.ops
 	return func() tea.Msg {
-		pane, err := ops.Start(cwd, id, "", false, account, "")
-		return startedMsg{id: id, cwd: cwd, pane: pane, err: err}
+		pane, err := ops.Start(cwd, id, name, false, account, prompt)
+		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err}
 	}
 }
 
 func (m *model) resume(r deck.Row) tea.Cmd {
 	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
 	name, home := m.state.Names[r.SessionID], m.home
+	sub, isSub := m.state.SubOf(r.SessionID)
+	queued := slices.Contains(m.state.Cleanups, r.SessionID)
+	prompt := m.firstPrompt(r.SessionID)
 	return func() tea.Msg {
+		if isSub && queued {
+			return startedMsg{id: r.SessionID, err: fmt.Errorf("answer the worktree question for %s first", sub.Name)}
+		}
+		if _, err := os.Stat(sub.Dir); isSub && err != nil {
+			return startedMsg{id: r.SessionID, err: fmt.Errorf("the worktree %s was removed", sub.Dir)}
+		}
 		var rev *review.State
 		if st, ok, _ := review.Load(home, r.SessionID); ok {
 			rev = &st
 		}
-		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, "")
+		pane, err := ops.Start(r.Cwd, r.SessionID, name, true, account, prompt)
 		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
 	}
 }

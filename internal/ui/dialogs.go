@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"uuid"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/live"
@@ -148,7 +150,7 @@ func (m *model) pickerKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.picker = nil
-		return m.start(p.shown[p.cursor], p.account)
+		return m.start(uuid.NewV4().String(), p.shown[p.cursor], "", p.account, "")
 	case "ctrl+a":
 		if len(p.accounts) > 1 {
 			p.account = nextAccount(p.accounts, p.account)
@@ -452,6 +454,10 @@ func (m *model) restartKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) restartRow(r deck.Row) tea.Cmd {
+	return m.relaunch(r, "", m.firstPrompt(r.SessionID))
+}
+
+func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 	account := m.state.AccountFor(r.SessionID)
 	if m.resuming[r.SessionID] {
 		return nil
@@ -459,6 +465,14 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 	if !accounts.LoggedIn(m.home, account) {
 		m.err = fmt.Errorf("account %s is not logged in, press A to log in", account)
 		return nil
+	}
+	if fresh == "" && m.continueAfter[r.SessionID] {
+		delete(m.continueAfter, r.SessionID)
+		if prompt == "" {
+			prompt = "continue"
+		} else {
+			prompt += " Then continue."
+		}
 	}
 	m.resuming[r.SessionID] = true
 	m.markEnding(r.SessionID)
@@ -470,10 +484,11 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 	if r.JobSession != "" {
 		id = r.JobSession
 	}
-	prompt := ""
-	if m.continueAfter[r.SessionID] {
-		delete(m.continueAfter, r.SessionID)
-		prompt = "continue"
+	if fresh != "" {
+		if m.isAssistant(r.SessionID) {
+			ops.AssistantID = fresh
+		}
+		id = fresh
 	}
 	run := func() tea.Msg {
 		if r.Job != "" {
@@ -484,7 +499,7 @@ func (m *model) restartRow(r deck.Row) tea.Cmd {
 		if err := ops.Stop(r.PaneID, r.Busy); err != nil {
 			return restartedMsg{row: r, err: err, stopFailed: true}
 		}
-		pane, err := ops.Start(r.Cwd, id, name, true, account, prompt)
+		pane, err := ops.Start(r.Cwd, id, name, fresh == "", account, prompt)
 		return restartedMsg{row: r, id: id, pane: pane, err: err}
 	}
 	return tea.Sequence(m.showSelected(), run)
@@ -518,6 +533,9 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 }
 
 func (m *model) moveSession(from, to string) {
+	if m.isAssistant(from) {
+		m.setAssistantID(to)
+	}
 	for i := range m.state.Active {
 		if m.state.Active[i].SessionID == from {
 			m.state.Active[i].SessionID = to
@@ -538,4 +556,80 @@ func (m *model) moveSession(from, to string) {
 	if m.selected == from {
 		m.selected = to
 	}
+	m.remapSubs(from, to)
+}
+
+func (m *model) remapSubs(from, to string) {
+	for i := range m.state.Subs {
+		if m.state.Subs[i].ID == from {
+			m.state.Subs[i].ID = to
+		}
+		if m.state.Subs[i].Parent == from {
+			m.state.Subs[i].Parent = to
+		}
+	}
+	for i, id := range m.state.Cleanups {
+		if id == from {
+			m.state.Cleanups[i] = to
+		}
+	}
+	if m.cleanup != nil && m.cleanup.sub.ID == from {
+		m.cleanup.sub.ID = to
+	}
+}
+
+const cleanupGuard = time.Second
+
+type cleanupDialog struct {
+	sub     store.Subsession
+	lastKey time.Time
+}
+
+type worktreeRemovedMsg struct {
+	id  string
+	err error
+}
+
+func (d *cleanupDialog) view(w, h int) string {
+	body := []string{
+		normal.Render(ansi.Truncate("Remove the worktree "+ctl.Worktree(d.sub.Repo, d.sub.Name)+" and all its files? (y/n)", w, "…")),
+		gray.Render(ansi.Truncate("The branch "+d.sub.Branch+" stays.", w, "…")),
+	}
+	return page(body, gray.Render(ansi.Truncate("y remove  n keep", w, "")), h)
+}
+
+func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
+	key, now := msg.String(), time.Now()
+	quiet := now.Sub(m.cleanup.lastKey) >= cleanupGuard
+	m.cleanup.lastKey = now
+	if !quiet || (key != "y" && key != "n" && key != "esc") {
+		return nil
+	}
+	sub := m.cleanup.sub
+	m.cleanup = nil
+	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
+	cmds := []tea.Cmd{m.saveState()}
+	if r, ok := m.rowByID(sub.ID); key == "y" && (m.resuming[sub.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
+		m.err = fmt.Errorf("%s is running; the worktree stays", sub.Name)
+	} else if key == "y" {
+		cmds = append(cmds, func() tea.Msg {
+			return worktreeRemovedMsg{id: sub.ID, err: ctl.Remove(sub.Repo, sub.Name, deck.Trash)}
+		})
+	}
+	if next := m.nextCleanup(); next != nil {
+		cmds = append(cmds, next)
+	} else if !m.dialogOpen() {
+		cmds = append(cmds, m.zoom(false))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.err = msg.err
+		return nil
+	}
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == msg.id })
+	m.rebuild()
+	return m.saveState()
 }
