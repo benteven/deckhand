@@ -61,7 +61,7 @@ func ctlUsage(group string) string {
 	case "sub":
 		return "usage:\n  deckhand sub start --name NAME --parent ADDR -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
 	case "task":
-		return "usage:\n  deckhand task new --title T [--prio P] [--deadline D] [--from F] [--project NAME] -- CONTEXT\n  deckhand task list\n  deckhand task update [ID] [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]\n  deckhand task done [ID] [--summary TEXT]\n"
+		return "usage:\n  deckhand task new --title T [--prio P] [--deadline D] [--from F] [--project NAME] -- CONTEXT\n  deckhand task list\n  deckhand task start ID [--model fable|opus|sonnet]\n  deckhand task update [ID] [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]\n  deckhand task done [ID] [--summary TEXT]\n"
 	case "project":
 		return "usage:\n  deckhand project mark ID\n  deckhand project unmark ID\n  deckhand project list\n"
 	}
@@ -196,6 +196,15 @@ func parseTask(verb string, rest []string) (ctl.Request, error) {
 			return ctl.Request{}, errUsage
 		}
 		return ctl.Request{Op: "task-list"}, nil
+	case "start":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "--") {
+			return ctl.Request{}, errUsage
+		}
+		f, err := parseFlags(rest[1:], "model")
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		return ctl.Request{Op: "task-start", Target: rest[0], Args: f}, nil
 	case "new":
 		head, tail, ok := splitDash(rest)
 		if !ok || len(tail) == 0 {

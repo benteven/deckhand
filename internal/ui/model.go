@@ -481,6 +481,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.worktreeRemoved(msg)
 	case subCreatedMsg:
 		return m, m.subCreated(msg)
+	case taskCreatedMsg:
+		return m, m.taskCreated(msg)
 	case cleanupMsg:
 		return m, m.queueCleanup(msg.id)
 	case restartedMsg:
@@ -1358,6 +1360,14 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 		}
 		old := p.SessionID
 		entry := &m.state.Active[k]
+		if m.projectOf(old) {
+			if n := m.sessionName(old); n != "" {
+				if m.state.Names == nil {
+					m.state.Names = map[string]string{}
+				}
+				m.state.Names[next.SessionID] = n
+			}
+		}
 		entry.SessionID, entry.Name = next.SessionID, ""
 		m.remapSubs(old, next.SessionID)
 		if m.isAssistant(old) {
@@ -1693,17 +1703,21 @@ func (m *model) saveTasks() tea.Cmd {
 }
 
 func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
-	if account != m.state.Account {
+	return m.launch(deck.Launch{Cwd: cwd, SessionID: id, Name: name, Account: account, Prompt: prompt})
+}
+
+func (m *model) launch(l deck.Launch) tea.Cmd {
+	if l.Account != m.state.Account {
 		if m.state.Accounts == nil {
 			m.state.Accounts = map[string]string{}
 		}
-		m.state.Accounts[id] = account
+		m.state.Accounts[l.SessionID] = l.Account
 	}
-	account = m.launchAccount(id, account)
-	start := m.starter(m.ops, id)
+	l.Account = m.launchAccount(l.SessionID, l.Account)
+	start := m.starter(m.ops, l.SessionID)
 	return func() tea.Msg {
-		pane, warn, err := start(deck.Launch{Cwd: cwd, SessionID: id, Name: name, Account: account, Prompt: prompt})
-		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err, warn: warn}
+		pane, warn, err := start(l)
+		return startedMsg{id: l.SessionID, cwd: l.Cwd, name: l.Name, pane: pane, err: err, warn: warn}
 	}
 }
 

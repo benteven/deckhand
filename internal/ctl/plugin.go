@@ -24,6 +24,22 @@ The deckhand binary is ` + exe + `.
 `
 }
 
+func tasksSkill(exe string) string {
+	return `---
+name: tasks
+description: List and start the tasks of a deckhand project, and report the state of your own task.
+---
+
+The deckhand binary is ` + exe + `.
+
+1. A project: ` + "`" + exe + " task list`" + ` shows your open tasks as JSON lines.
+2. A project: ` + "`" + exe + " task start <id> [--model fable|opus|sonnet]`" + ` starts the task as a fork of your conversation, in its own worktree from the default branch. Opus is the default; use Fable only for a very important task.
+3. A task: ` + "`" + exe + " task update [--status S] [--need TEXT] [--waits-on W] [--pr URL]`" + ` changes your own task. S is todo, working, needs-you or waiting.
+4. A task: ` + "`" + exe + " task done [--summary TEXT]`" + ` when the PR is merged.
+5. A task that needs the user asks in its own reply and ends its turn. Deckhand sets the task to needs-you and tells the assistant.
+`
+}
+
 func sessionsSkill(exe string) string {
 	return `---
 name: sessions
@@ -65,11 +81,12 @@ func writePlugin(dir string, skills map[string]string) error {
 }
 
 func WritePlugins(home, exe string) error {
-	if err := writePlugin(filepath.Join(home, "plugin"), map[string]string{"subsession": subsessionSkill(exe)}); err != nil {
+	if err := writePlugin(filepath.Join(home, "plugin"), map[string]string{"subsession": subsessionSkill(exe), "tasks": tasksSkill(exe)}); err != nil {
 		return err
 	}
 	return writePlugin(filepath.Join(home, "plugin-assistant"), map[string]string{
 		"subsession": subsessionSkill(exe),
 		"sessions":   sessionsSkill(exe),
+		"tasks":      tasksSkill(exe),
 	})
 }
