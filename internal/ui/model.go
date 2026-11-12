@@ -25,6 +25,7 @@ import (
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
+	"github.com/benteven/deckhand/internal/tasks"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/update"
@@ -197,6 +198,11 @@ type stateSaver struct {
 	state store.State
 }
 
+type taskSaver struct {
+	mu    sync.Mutex
+	tasks []tasks.Task
+}
+
 type model struct {
 	ops        deck.Ops
 	reader     *transcript.Reader
@@ -233,6 +239,8 @@ type model struct {
 	slot         string
 	want         *slotWant
 	saver        *stateSaver
+	tasks        []tasks.Task
+	taskSaver    *taskSaver
 	prevSelected string
 
 	focused       bool
@@ -305,6 +313,10 @@ func Run(version string) error {
 	if err != nil {
 		return err
 	}
+	taskList, err := tasks.Load(home)
+	if err != nil {
+		return err
+	}
 	saved, err := store.LoadPRs(home)
 	if err != nil {
 		saved = map[string]store.PRState{}
@@ -349,6 +361,8 @@ func Run(version string) error {
 		state:       state,
 		want:        &slotWant{},
 		saver:       &stateSaver{},
+		tasks:       taskList,
+		taskSaver:   &taskSaver{},
 		starts:      &pidStarts{at: map[paneProc]time.Time{}},
 		prs:         loadedPRs(saved),
 		prSem:       make(chan struct{}, prParallel),
@@ -1385,7 +1399,7 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 			cmds = append(cmds, m.zoom(false))
 		}
 		eventsDir := filepath.Join(m.home, "events")
-		cmds = append(cmds, m.tmux("set-option", "-p", "-t", p.ID, "@deck-session", next.SessionID), m.saveState(), func() tea.Msg {
+		cmds = append(cmds, m.tmux("set-option", "-p", "-t", p.ID, "@deck-session", next.SessionID), m.saveState(), m.saveTasks(), func() tea.Msg {
 			events.Remove(eventsDir, old)
 			return nil
 		})
@@ -1646,12 +1660,32 @@ func (m *model) saveState() tea.Cmd {
 	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
 	st.Models, st.Roles = maps.Clone(st.Models), maps.Clone(st.Roles)
 	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
+	st.Projects = slices.Clone(st.Projects)
 	sv.state = st
 	sv.mu.Unlock()
 	return func() tea.Msg {
 		sv.mu.Lock()
 		defer sv.mu.Unlock()
 		if err := sv.state.Save(home); err != nil {
+			return errMsg{err}
+		}
+		return nil
+	}
+}
+
+func (m *model) saveTasks() tea.Cmd {
+	sv, home := m.taskSaver, m.home
+	sv.mu.Lock()
+	sv.tasks = make([]tasks.Task, len(m.tasks))
+	for i, t := range m.tasks {
+		t.History = slices.Clone(t.History)
+		sv.tasks[i] = t
+	}
+	sv.mu.Unlock()
+	return func() tea.Msg {
+		sv.mu.Lock()
+		defer sv.mu.Unlock()
+		if err := tasks.Save(home, sv.tasks); err != nil {
 			return errMsg{err}
 		}
 		return nil

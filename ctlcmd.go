@@ -57,8 +57,13 @@ func randomID() string {
 }
 
 func ctlUsage(group string) string {
-	if group == "sub" {
+	switch group {
+	case "sub":
 		return "usage:\n  deckhand sub start --name NAME --parent ADDR -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
+	case "task":
+		return "usage:\n  deckhand task new --title T [--prio P] [--deadline D] [--from F] [--project NAME] -- CONTEXT\n  deckhand task list\n  deckhand task update [ID] [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]\n  deckhand task done [ID] [--summary TEXT]\n"
+	case "project":
+		return "usage:\n  deckhand project mark ID\n  deckhand project unmark ID\n  deckhand project list\n"
 	}
 	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] -- PROMPT\n  deckhand session resume ID\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
@@ -100,8 +105,13 @@ func parseCtl(group string, args []string) (ctl.Request, error) {
 		return ctl.Request{}, errUsage
 	}
 	verb, rest := args[0], args[1:]
-	if group == "sub" {
+	switch group {
+	case "sub":
 		return parseSub(verb, rest)
+	case "task":
+		return parseTask(verb, rest)
+	case "project":
+		return parseProject(verb, rest)
 	}
 	return parseSession(verb, rest)
 }
@@ -175,6 +185,63 @@ func parseSub(verb string, rest []string) (ctl.Request, error) {
 			return ctl.Request{}, errUsage
 		}
 		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Text: strings.Join(tail, " ")}, nil
+	}
+	return ctl.Request{}, errUsage
+}
+
+func parseTask(verb string, rest []string) (ctl.Request, error) {
+	switch verb {
+	case "list":
+		if len(rest) != 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "task-list"}, nil
+	case "new":
+		head, tail, ok := splitDash(rest)
+		if !ok || len(tail) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		f, err := parseFlags(head, "title", "prio", "deadline", "from", "project")
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		if f["title"] == "" {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "task-new", Args: f, Text: strings.Join(tail, " ")}, nil
+	case "update", "done":
+		target := ""
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "--") {
+			target, rest = rest[0], rest[1:]
+		}
+		allowed := []string{"summary"}
+		if verb == "update" {
+			allowed = []string{"title", "prio", "deadline", "status", "need", "waits-on", "pr", "project"}
+		}
+		f, err := parseFlags(rest, allowed...)
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		if verb == "update" && len(f) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "task-" + verb, Target: target, Args: f}, nil
+	}
+	return ctl.Request{}, errUsage
+}
+
+func parseProject(verb string, rest []string) (ctl.Request, error) {
+	switch verb {
+	case "list":
+		if len(rest) != 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "project-list"}, nil
+	case "mark", "unmark":
+		if len(rest) != 1 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "project-" + verb, Target: rest[0]}, nil
 	}
 	return ctl.Request{}, errUsage
 }

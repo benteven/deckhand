@@ -528,16 +528,17 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 	if msg.warn != nil {
 		m.err = msg.warn
 	}
+	var moved tea.Cmd
 	if msg.id != id {
 		m.moveSession(id, msg.id)
-		id = msg.id
+		id, moved = msg.id, m.saveTasks()
 	}
 	m.in.Panes[id] = msg.pane
 	m.rebuild()
 	if late {
-		return tea.Batch(m.saveState(), m.stopLateAssistant(id))
+		return tea.Batch(m.saveState(), moved, m.stopLateAssistant(id))
 	}
-	return tea.Batch(m.saveState(), m.showSelected())
+	return tea.Batch(m.saveState(), moved, m.showSelected())
 }
 
 func (m *model) moveSession(from, to string) {
@@ -583,6 +584,25 @@ func (m *model) remapSubs(from, to string) {
 	}
 	if m.cleanup != nil && m.cleanup.sub.ID == from {
 		m.cleanup.sub.ID = to
+	}
+	for i := range m.tasks {
+		if m.tasks[i].Session == from {
+			m.tasks[i].Session = to
+		}
+		if m.tasks[i].Project == from {
+			m.tasks[i].Project = to
+		}
+	}
+	for i, id := range m.state.Projects {
+		if id == from {
+			m.state.Projects[i] = to
+		}
+	}
+	for _, links := range []map[string]string{m.state.Models, m.state.Roles} {
+		if v, ok := links[from]; ok {
+			links[to] = v
+			delete(links, from)
+		}
 	}
 }
 

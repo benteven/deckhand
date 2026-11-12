@@ -113,6 +113,7 @@ type State struct {
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
 	Models    map[string]string    `json:"models,omitempty"`
 	Roles     map[string]string    `json:"roles,omitempty"`
+	Projects  []string             `json:"projects,omitempty"`
 	Assistant Assistant            `json:"assistant"`
 	Subs      []Subsession         `json:"subs,omitempty"`
 	Cleanups  []string             `json:"cleanups,omitempty"`

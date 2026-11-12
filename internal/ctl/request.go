@@ -29,6 +29,7 @@ type Request struct {
 	Account string
 	Parent  string
 	Text    string
+	Args    map[string]string
 }
 
 type Reply struct {
