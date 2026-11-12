@@ -299,6 +299,7 @@ type model struct {
 	updating      bool
 	restartDue    bool
 	notes         []string
+	turns         map[string]string
 	reprompt      time.Time
 	typing        map[string]bool
 }
@@ -452,7 +453,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prev := m.in.Events
 		applied := m.apply(msg)
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()))
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.deliverTurns())
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -483,6 +484,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.subCreated(msg)
 	case taskCreatedMsg:
 		return m, m.taskCreated(msg)
+	case roleFoundMsg:
+		return m, m.roleFound(msg)
+	case queueNamedMsg:
+		return m, m.queueNamed(msg)
 	case cleanupMsg:
 		return m, m.queueCleanup(msg.id)
 	case restartedMsg:
@@ -924,8 +929,9 @@ func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == r.SessionID })
 	m.markEnding(r.SessionID)
 	m.rebuild()
+	drop := m.dropFromQueues(r.SessionID)
 	ops, pane, busy, home := m.ops, r.PaneID, r.Busy, m.home
-	_, sub := m.state.SubOf(r.SessionID)
+	sub := m.ownsWorktree(r.SessionID)
 	stop := func() tea.Msg {
 		err := ops.Stop(pane, busy)
 		if req != "" {
@@ -945,7 +951,7 @@ func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 		}
 		return nil
 	}
-	return tea.Batch(m.saveState(), tea.Sequence(m.showSelected(), stop))
+	return tea.Batch(drop, m.saveState(), tea.Sequence(m.showSelected(), stop))
 }
 
 func (m *model) refreshPreview() tea.Cmd {
@@ -956,7 +962,7 @@ func (m *model) refreshPreview() tea.Cmd {
 }
 
 func (m *model) endDead(panes []tmux.Pane, slotPane string) tea.Cmd {
-	var kills []tea.Cmd
+	var kills, drops []tea.Cmd
 	inSlot := false
 	for _, p := range panes {
 		if !p.Dead || p.SessionID == "" || m.resuming[p.SessionID] {
@@ -969,6 +975,7 @@ func (m *model) endDead(panes []tmux.Pane, slotPane string) tea.Cmd {
 		}
 		inSlot = inSlot || p.ID == slotPane
 		m.markEnding(p.SessionID)
+		drops = append(drops, m.dropFromQueues(p.SessionID))
 		if m.isAssistant(p.SessionID) {
 			kills = append(kills, m.assistantDied(p.ID))
 			continue
@@ -984,7 +991,7 @@ func (m *model) endDead(panes []tmux.Pane, slotPane string) tea.Cmd {
 		seq = append(seq, m.showSelected())
 	}
 	seq = append(seq, kills...)
-	return tea.Batch(m.saveState(), tea.Sequence(seq...))
+	return tea.Batch(tea.Batch(drops...), m.saveState(), tea.Sequence(seq...))
 }
 
 func (m *model) move(d int) tea.Cmd {
@@ -1671,6 +1678,10 @@ func (m *model) saveState() tea.Cmd {
 	st.Models, st.Roles = maps.Clone(st.Models), maps.Clone(st.Roles)
 	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
 	st.Projects = slices.Clone(st.Projects)
+	st.Queues = maps.Clone(st.Queues)
+	for name, q := range st.Queues {
+		st.Queues[name] = slices.Clone(q)
+	}
 	sv.state = st
 	sv.mu.Unlock()
 	return func() tea.Msg {

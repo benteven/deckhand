@@ -117,6 +117,7 @@ type State struct {
 	Assistant Assistant            `json:"assistant"`
 	Subs      []Subsession         `json:"subs,omitempty"`
 	Cleanups  []string             `json:"cleanups,omitempty"`
+	Queues    map[string][]string  `json:"queues,omitempty"`
 }
 
 func (s State) SubOf(id string) (Subsession, bool) {

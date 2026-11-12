@@ -64,7 +64,7 @@ func main() {
 		}
 	case "session":
 		runCtl("session", os.Args[2:])
-	case "sub", "task", "project":
+	case "sub", "task", "project", "role", "queue":
 		runCtl(os.Args[1], os.Args[2:])
 	case "version":
 		fmt.Println(version)

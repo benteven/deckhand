@@ -65,6 +65,14 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 			cmds = append(cmds, m.projectRequest(req))
 			continue
 		}
+		if strings.HasPrefix(req.Op, "role-") {
+			cmds = append(cmds, m.roleRequest(req))
+			continue
+		}
+		if strings.HasPrefix(req.Op, "queue-") {
+			cmds = append(cmds, m.queueRequest(req))
+			continue
+		}
 		cmds = append(cmds, m.handleRequest(req))
 	}
 	for id, at := range m.requests {

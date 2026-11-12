@@ -388,3 +388,148 @@ func cutSlug(slug string, n int) string {
 	}
 	return strings.TrimRight(slug, "-")
 }
+
+type roleFoundMsg struct {
+	req  ctl.Request
+	role roles.Role
+	err  error
+}
+
+const projectRole = "project"
+
+func (m *model) helperRole(id string) bool {
+	role := m.state.Roles[id]
+	return role != "" && role != taskRole && role != projectRole
+}
+
+func (m *model) ownsWorktree(id string) bool {
+	_, ok := m.state.SubOf(id)
+	return ok && !m.helperRole(id)
+}
+
+func (m *model) roleRequest(req ctl.Request) tea.Cmd {
+	fail := func(format string, a ...any) tea.Cmd {
+		return m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf(format, a...)})
+	}
+	switch req.Op {
+	case "role-list":
+		if !m.projectOf(req.Caller) {
+			return fail("only a project can do this")
+		}
+		r, ok := m.rowByID(req.Caller)
+		if !ok {
+			return fail("the project is not in deckhand")
+		}
+		home, cwd := m.home, r.Cwd
+		return func() tea.Msg {
+			var lines []string
+			for _, role := range roles.List(home, ctl.TopLevel(cwd)) {
+				if role.Name != taskRole && role.Name != projectRole {
+					lines = append(lines, role.Name+"\t"+role.Model+"\t"+role.Description)
+				}
+			}
+			if err := ctl.Answer(home, req.ID, ctl.Reply{Out: strings.Join(lines, "\n")}); err != nil {
+				return errMsg{err}
+			}
+			return nil
+		}
+	case "role-start":
+		t, err := m.roleTask(req)
+		if err != nil {
+			return fail("%s", err)
+		}
+		home := m.home
+		return func() tea.Msg {
+			r, err := roles.Find(home, t.Repo, req.Name)
+			return roleFoundMsg{req: req, role: r, err: err}
+		}
+	case "role-model":
+		if m.state.Roles[req.Caller] == "" {
+			return fail("only a role session can do this")
+		}
+		model := req.Args["model"]
+		if !slices.Contains(taskModels, model) {
+			return fail("model is one of %s", strings.Join(taskModels, ", "))
+		}
+		r, ok := m.rowByID(req.Caller)
+		switch {
+		case !ok || r.Kind != deck.Live || m.resuming[r.SessionID]:
+			return fail("this session is not running in deckhand")
+		case m.slot == r.PaneID && !m.focused:
+			return fail("the user is in %s now; try again later", r.Name)
+		}
+		if m.state.Models == nil {
+			m.state.Models = map[string]string{}
+		}
+		m.state.Models[req.Caller] = model
+		if m.continueAfter == nil {
+			m.continueAfter = map[string]bool{}
+		}
+		m.continueAfter[req.Caller] = true
+		restart := m.restartRow(r)
+		if restart == nil {
+			delete(m.continueAfter, req.Caller)
+			return tea.Batch(m.saveState(), fail("could not restart; the model changes at the next start"))
+		}
+		return tea.Sequence(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "restarting on " + model}), restart)
+	}
+	return fail("unknown request %s", req.Op)
+}
+
+func (m *model) roleTask(req ctl.Request) (tasks.Task, error) {
+	i := slices.IndexFunc(m.tasks, func(t tasks.Task) bool { return t.ID == req.Target })
+	if i < 0 {
+		return tasks.Task{}, fmt.Errorf("no task %s", req.Target)
+	}
+	t := m.tasks[i]
+	switch {
+	case t.Project == "" || t.Project != req.Caller:
+		return t, fmt.Errorf("only the project of task %s can start its roles", t.ID)
+	case t.Status == "done":
+		return t, fmt.Errorf("task %s is done", t.ID)
+	case t.Session == "" || t.Dir == "":
+		return t, fmt.Errorf("task %s has no session yet", t.ID)
+	case req.Name == taskRole || req.Name == projectRole:
+		return t, fmt.Errorf("%s is not a role to start", req.Name)
+	case m.nameRunning(m.roleName(t, req.Name)):
+		return t, fmt.Errorf("a session named %s is running", m.roleName(t, req.Name))
+	}
+	return t, nil
+}
+
+func (m *model) roleName(t tasks.Task, role string) string {
+	slug := cutSlug(taskSlug(t.Title), 40)
+	if sub, ok := m.state.SubOf(t.Session); ok {
+		slug = sub.Name
+	}
+	return slug + "-" + role
+}
+
+func (m *model) roleFound(msg roleFoundMsg) tea.Cmd {
+	req := msg.req
+	if msg.err != nil {
+		return m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("no role %s: %s", req.Name, msg.err)})
+	}
+	t, err := m.roleTask(req)
+	if err != nil {
+		return m.answer(req.ID, ctl.Reply{Err: err.Error()})
+	}
+	name := m.roleName(t, req.Name)
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.Parent == t.Project && s.Name == name })
+	id := uuid.NewV4().String()
+	m.state.Subs = append(m.state.Subs, store.Subsession{ID: id, Parent: t.Project, Name: name, Dir: t.Dir, Repo: t.Repo, Branch: t.Branch})
+	if m.state.Roles == nil {
+		m.state.Roles = map[string]string{}
+	}
+	m.state.Roles[id] = req.Name
+	if msg.role.Model != "" {
+		if m.state.Models == nil {
+			m.state.Models = map[string]string{}
+		}
+		m.state.Models[id] = msg.role.Model
+	}
+	prompt := fmt.Sprintf("deckhand started you as the %s of task %s: %s. You work in %s on branch %s.", req.Name, t.ID, t.Title, t.Dir, t.Branch)
+	launch := deck.Launch{Cwd: t.Dir, SessionID: id, Name: name, Account: m.state.AccountFor(t.Session), Prompt: prompt, ForkOf: t.Session, ForkCwd: t.Dir}
+	out := fmt.Sprintf("started %s for task %s as %s in %s", req.Name, t.ID, name, t.Dir)
+	return tea.Batch(m.saveState(), forRequest(m.launch(launch), req.ID, out))
+}

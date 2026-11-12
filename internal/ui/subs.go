@@ -82,6 +82,10 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 		case ok && m.resuming[sub.ID]:
 			return fail("%s is starting; try again later", r.Name)
 		}
+		if m.helperRole(sub.ID) {
+			m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == sub.ID })
+			return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "closed"}))
+		}
 		if _, err := os.Stat(ctl.Worktree(sub.Repo, sub.Name)); err != nil {
 			return fail("the worktree %s was removed", ctl.Worktree(sub.Repo, sub.Name))
 		}

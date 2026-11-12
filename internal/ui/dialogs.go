@@ -598,10 +598,17 @@ func (m *model) remapSubs(from, to string) {
 			m.state.Projects[i] = to
 		}
 	}
-	for _, links := range []map[string]string{m.state.Models, m.state.Roles} {
+	for _, links := range []map[string]string{m.state.Models, m.state.Roles, m.turns} {
 		if v, ok := links[from]; ok {
 			links[to] = v
 			delete(links, from)
+		}
+	}
+	for _, q := range m.state.Queues {
+		for i, id := range q {
+			if id == from {
+				q[i] = to
+			}
 		}
 	}
 }
@@ -637,8 +644,8 @@ func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.cleanup = nil
 	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
 	cmds := []tea.Cmd{m.saveState()}
-	if r, ok := m.rowByID(sub.ID); key == "y" && (m.resuming[sub.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
-		m.err = fmt.Errorf("%s is running; the worktree stays", sub.Name)
+	if name, ok := m.runningIn(sub.Dir); key == "y" && ok {
+		m.err = fmt.Errorf("%s is running; the worktree stays", name)
 	} else if key == "y" {
 		cmds = append(cmds, func() tea.Msg {
 			return worktreeRemovedMsg{id: sub.ID, err: ctl.Remove(sub.Repo, sub.Name, deck.Trash)}
@@ -657,7 +664,25 @@ func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 		m.err = msg.err
 		return nil
 	}
-	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == msg.id })
+	dir := ""
+	if sub, ok := m.state.SubOf(msg.id); ok {
+		dir = sub.Dir
+	}
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool {
+		return s.ID == msg.id || (s.Dir == dir && m.helperRole(s.ID))
+	})
 	m.rebuild()
 	return m.saveState()
+}
+
+func (m *model) runningIn(dir string) (string, bool) {
+	for _, s := range m.state.Subs {
+		if s.Dir != dir {
+			continue
+		}
+		if r, ok := m.rowByID(s.ID); m.resuming[s.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere) {
+			return s.Name, true
+		}
+	}
+	return "", false
 }
