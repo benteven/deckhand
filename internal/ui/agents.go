@@ -32,6 +32,14 @@ func (m *model) agentAt(i int, r deck.Row) int {
 
 func (m *model) toggleAgentMode() tea.Cmd {
 	m.agentMode = !m.agentMode
+	switch {
+	case !m.agentMode:
+		m.hint = "Agent mode off"
+	case slices.ContainsFunc(m.shown(), func(r deck.Row) bool { return len(visibleAgents(r)) > 0 }):
+		m.hint = "Agent mode on: j/k step through subagents"
+	default:
+		m.hint = "Agent mode on: no subagents are running"
+	}
 	if m.agent == "" {
 		return nil
 	}
