@@ -453,7 +453,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prev := m.in.Events
 		applied := m.apply(msg)
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.deliverTurns())
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests), m.waitNotes(prev, msg.events), m.keepAssistant(time.Now()), m.pruneQueues(), m.deliverTurns())
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {

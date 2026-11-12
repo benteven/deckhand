@@ -125,6 +125,22 @@ func (m *model) dropFromQueues(id string) tea.Cmd {
 	return tea.Batch(m.saveState(), m.deliverTurns())
 }
 
+func (m *model) pruneQueues() tea.Cmd {
+	var gone []string
+	for _, q := range m.state.Queues {
+		for _, id := range q {
+			if r, ok := m.rowByID(id); !m.resuming[id] && !(ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
+				gone = append(gone, id)
+			}
+		}
+	}
+	var cmds []tea.Cmd
+	for _, id := range gone {
+		cmds = append(cmds, m.dropFromQueues(id))
+	}
+	return tea.Batch(cmds...)
+}
+
 func (m *model) deliverTurns() tea.Cmd {
 	var cmds []tea.Cmd
 	for id, name := range m.turns {
