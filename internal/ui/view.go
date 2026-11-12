@@ -343,7 +343,7 @@ func rowMarks(r deck.Row) string {
 	mark := ""
 	if r.Assistant {
 		mark += " " + gray.Render("assistant")
-		if r.Kind == deck.Suspended {
+		if r.Paused {
 			mark += " " + gray.Render("paused")
 		}
 	}

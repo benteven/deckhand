@@ -129,7 +129,7 @@ func (m *model) nextCleanup() tea.Cmd {
 	}
 	for len(m.state.Cleanups) > 0 {
 		if sub, ok := m.state.SubOf(m.state.Cleanups[0]); ok {
-			m.cleanup = &cleanupDialog{sub: sub, opened: time.Now()}
+			m.cleanup = &cleanupDialog{sub: sub, lastKey: time.Now()}
 			return tea.Sequence(m.zoom(true), m.focus(tmux.ListPane))
 		}
 		m.state.Cleanups = m.state.Cleanups[1:]

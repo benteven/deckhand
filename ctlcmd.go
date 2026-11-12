@@ -25,12 +25,12 @@ func runCtl(group string, args []string) {
 		os.Exit(2)
 	}
 	req.Caller = os.Getenv(ctl.SessionEnv)
-	if req.Caller == "" {
+	if sock, _, _ := strings.Cut(os.Getenv("TMUX"), ","); sock != "" && filepath.Base(sock) == paths.Socket() {
+		req.Caller, req.Pane = "", os.Getenv("TMUX_PANE")
+	}
+	if req.Caller == "" && req.Pane == "" {
 		fmt.Fprintln(os.Stderr, "run this from a deckhand session")
 		os.Exit(2)
-	}
-	if sock, _, _ := strings.Cut(os.Getenv("TMUX"), ","); sock != "" && filepath.Base(sock) == paths.Socket() {
-		req.Pane = os.Getenv("TMUX_PANE")
 	}
 	req.ID = randomID()
 	rep, err := ctl.Send(paths.DeckHome(), req, ctl.RequestTimeout)

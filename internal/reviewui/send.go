@@ -2,18 +2,14 @@ package reviewui
 
 import (
 	"errors"
-	"fmt"
-	"regexp"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/benteven/deckhand/internal/live"
-	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/textclean"
 	"github.com/benteven/deckhand/internal/tmux"
+	"github.com/benteven/deckhand/internal/typing"
 )
 
 type outbound struct {
@@ -30,11 +26,7 @@ type sentMsg struct {
 
 type retryMsg struct{ out outbound }
 
-var (
-	sendMu   sync.Mutex
-	sendSeq  atomic.Int64
-	menuLine = regexp.MustCompile(`(?m)^\s*(❯\s*)?1\.\s+Yes\b`)
-)
+var sendMu sync.Mutex
 
 func (m *model) send(o outbound) tea.Cmd {
 	t, id := m.t, m.id
@@ -65,33 +57,14 @@ func deliver(t tmux.Client, id, text string) sentMsg {
 	if err != nil {
 		return sentMsg{err: err}
 	}
-	if asking(t, id, pane) {
+	switch err := typing.Type(t, id, pane, text); {
+	case errors.Is(err, typing.ErrMenu):
 		return sentMsg{waiting: true}
-	}
-	buffer := fmt.Sprintf("deck-review-%s-%d", id, sendSeq.Add(1))
-	if err := t.RunInput(text, "load-buffer", "-b", buffer, "-"); err != nil {
-		return sentMsg{err: err}
-	}
-	if _, err := t.Run("paste-buffer", "-p", "-d", "-b", buffer, "-t", pane); err != nil {
-		return sentMsg{err: err}
-	}
-	time.Sleep(150 * time.Millisecond)
-	if asking(t, id, pane) {
+	case errors.Is(err, typing.ErrPasted):
 		return sentMsg{delivered: true, err: errors.New("Claude started asking; press enter in Claude to send your comment")}
+	default:
+		return sentMsg{err: err}
 	}
-	_, err = t.Run("send-keys", "-t", pane, "Enter")
-	return sentMsg{err: err}
-}
-
-func asking(t tmux.Client, id, pane string) bool {
-	sessions, _ := live.Running(paths.ClaudeHome())
-	for _, s := range sessions {
-		if s.SessionID == id && s.Status == "waiting" {
-			return true
-		}
-	}
-	screen, err := t.Run("capture-pane", "-p", "-t", pane, "-S", "-20")
-	return err == nil && menuLine.MatchString(screen)
 }
 
 func (m *model) sent(msg sentMsg) tea.Cmd {

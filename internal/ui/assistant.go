@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -15,6 +17,7 @@ import (
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/transcript"
+	"github.com/benteven/deckhand/internal/typing"
 )
 
 const (
@@ -23,6 +26,7 @@ const (
 	handoffContext  = 60
 	maxNotes        = 50
 	repromptWait    = 2 * time.Second
+	updateTimeout   = 10 * time.Minute
 	assistantPrompt = "deckhand started you again. Read instructions.md and your notes, and create your hourly round again with CronCreate."
 )
 
@@ -91,8 +95,15 @@ func (m *model) keepAssistant(now time.Time) tea.Cmd {
 		m.state.Assistant.UpdatedOn = now.Format(dayFormat)
 		m.updating = true
 		return tea.Batch(m.saveState(), func() tea.Msg {
-			out, err := exec.Command(paths.ClaudeCommand(), "update").CombinedOutput()
-			if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, paths.ClaudeCommand(), "update")
+			cmd.WaitDelay = 5 * time.Second
+			out, err := cmd.CombinedOutput()
+			switch {
+			case ctx.Err() != nil:
+				return updatedMsg{fmt.Errorf("claude update did not finish in %v", updateTimeout)}
+			case err != nil:
 				return updatedMsg{fmt.Errorf("claude update: %v: %s", err, strings.TrimSpace(string(out)))}
 			}
 			return updatedMsg{}
@@ -111,7 +122,15 @@ func (m *model) keepAssistant(now time.Time) tea.Cmd {
 		return nil
 	}
 	m.handoffs[r.PaneID].fresh = true
-	return m.typeIn(r.PaneID, prompt)
+	return m.typeIn(r, prompt, m.handoffTyped(r.PaneID, func(err error) tea.Cmd {
+		if err != nil && !errors.Is(err, typing.ErrPasted) {
+			m.restartDue = true
+		}
+		if err != nil && !errors.Is(err, typing.ErrMenu) {
+			m.err = typeError(r.Name, err)
+		}
+		return nil
+	}))
 }
 
 func inBackground(cmd tea.Cmd) tea.Cmd {
@@ -185,11 +204,14 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 		if !known || !waits(ev) || waits(before) || m.isAssistant(id) || m.ending[id] {
 			continue
 		}
+		if _, sub := m.state.SubOf(id); sub {
+			continue
+		}
 		r, ok := m.rowByID(id)
 		if !ok || r.Kind != deck.Live || (m.slot == r.PaneID && !m.focused) {
 			continue
 		}
-		text := ev.Message
+		text := strings.Join(strings.Fields(ev.Message), " ")
 		if text == "" {
 			text = "its turn ended"
 		}
@@ -203,7 +225,7 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 
 func (m *model) assistantFree(r deck.Row) bool {
 	id := r.SessionID
-	return m.isAssistant(id) && r.Kind == deck.Live && !m.resuming[id] && m.handoffs[r.PaneID] == nil && m.userAway(r)
+	return m.isAssistant(id) && r.Kind == deck.Live && !m.resuming[id] && m.handoffs[r.PaneID] == nil && !m.typing[r.PaneID] && m.userAway(r)
 }
 
 func (m *model) userAway(r deck.Row) bool {
@@ -213,14 +235,26 @@ func (m *model) userAway(r deck.Row) bool {
 func (m *model) deliverNotes() tea.Cmd {
 	reprompt := !m.reprompt.IsZero() && time.Since(m.reprompt) >= repromptWait
 	r, ok := m.rowByID(m.state.Assistant.ID)
-	if (len(m.notes) == 0 && !reprompt) || !ok || !m.assistantFree(r) {
+	if (len(m.notes) == 0 && !reprompt) || !ok || !m.assistantFree(r) || waitsForIdle(r) {
 		return nil
 	}
-	notes := m.notes
+	notes, at := m.notes, m.reprompt
+	text := strings.Join(notes, " ")
 	if reprompt {
-		notes = append([]string{assistantPrompt}, notes...)
+		text = strings.Join(append([]string{assistantPrompt}, notes...), " ")
 		m.reprompt = time.Time{}
 	}
 	m.notes = nil
-	return m.typeIn(r.PaneID, strings.Join(notes, " "))
+	return m.typeIn(r, text, func(err error) tea.Cmd {
+		switch {
+		case errors.Is(err, typing.ErrMenu):
+			m.notes = append(notes, m.notes...)
+			if reprompt && m.reprompt.IsZero() {
+				m.reprompt = at
+			}
+		case err != nil:
+			m.err = typeError(r.Name, err)
+		}
+		return nil
+	})
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/textclean"
+	"github.com/benteven/deckhand/internal/typing"
 )
 
 const (
@@ -52,7 +55,9 @@ func (m *model) handoffRefusal(r deck.Row) string {
 	switch {
 	case m.handoffs[r.PaneID] != nil:
 		return "A handoff is already running for this session"
-	case r.Busy:
+	case r.Asking || m.in.Events[r.SessionID].Menu():
+		return "The session shows a menu. Try again when it waits"
+	case r.Busy || m.typing[r.PaneID]:
 		return "The session is busy. Try again when it is idle"
 	}
 	return ""
@@ -61,14 +66,26 @@ func (m *model) handoffRefusal(r deck.Row) string {
 func (m *model) handoffKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "y":
-		r := m.handoff.row
+		r, ok := m.rowInPane(m.handoff.row.PaneID)
 		m.handoff = nil
+		if !ok || r.Kind != deck.Live {
+			return m.zoom(false)
+		}
+		if why := m.handoffRefusal(r); why != "" {
+			m.hint = why
+			return m.zoom(false)
+		}
 		prompt, err := m.beginHandoff(r)
 		if err != nil {
 			m.err = err
 			return m.zoom(false)
 		}
-		return tea.Sequence(m.zoom(false), m.typeIn(r.PaneID, prompt))
+		return tea.Sequence(m.zoom(false), m.typeIn(r, prompt, m.handoffTyped(r.PaneID, func(err error) tea.Cmd {
+			if err != nil {
+				m.err = typeError(r.Name, err)
+			}
+			return nil
+		})))
 	case "n", "esc":
 		m.handoff = nil
 		return m.zoom(false)
@@ -89,6 +106,17 @@ func (m *model) beginHandoff(r deck.Row) (string, error) {
 	return fmt.Sprintf("Write a handoff note to %s so a fresh session can pick up this work: the goal, what is done, what is left, key files and commands, decisions made, and open questions. Replace the file if it exists. Write only that file, then stop.", file), nil
 }
 
+func (m *model) handoffTyped(pane string, report func(error) tea.Cmd) func(error) tea.Cmd {
+	h := m.handoffs[pane]
+	return func(err error) tea.Cmd {
+		if err != nil && !errors.Is(err, typing.ErrPasted) && m.handoffs[pane] == h {
+			delete(m.handoffs, pane)
+			m.hint = ""
+		}
+		return report(err)
+	}
+}
+
 func (m *model) advanceHandoffs(now time.Time) tea.Cmd {
 	var cmds []tea.Cmd
 	for pane, h := range m.handoffs {
@@ -98,7 +126,7 @@ func (m *model) advanceHandoffs(now time.Time) tea.Cmd {
 			delete(m.handoffs, pane)
 			m.err = fmt.Errorf("handoff for %q stopped before the note was written", h.name)
 		case h.cleared.IsZero():
-			if r.Busy || !written(h.file, h.sent) {
+			if !m.canType(r) || !written(h.file, h.sent) {
 				continue
 			}
 			if h.fresh {
@@ -112,11 +140,34 @@ func (m *model) advanceHandoffs(now time.Time) tea.Cmd {
 			}
 			h.cleared = now
 			m.hint = "Clearing " + h.name
-			cmds = append(cmds, m.typeIn(pane, "/clear"))
+			cmds = append(cmds, m.typeIn(r, "/clear", func(err error) tea.Cmd {
+				switch {
+				case m.handoffs[pane] != h:
+				case errors.Is(err, typing.ErrMenu):
+					h.cleared = time.Time{}
+				case err != nil:
+					delete(m.handoffs, pane)
+					m.err = typeError(h.name, err)
+				}
+				return nil
+			}))
 		case (ok && r.SessionID != h.id) || now.Sub(h.cleared) > clearWait:
+			if !ok {
+				r = deck.Row{PaneID: pane, Name: h.name}
+			} else if !m.canType(r) {
+				continue
+			}
 			delete(m.handoffs, pane)
 			m.hint = ""
-			cmds = append(cmds, m.typeIn(pane, fmt.Sprintf("Read %s. It is the handoff note from before /clear. Continue the work from it.", h.file)))
+			cmds = append(cmds, m.typeIn(r, fmt.Sprintf("Read %s. It is the handoff note from before /clear. Continue the work from it.", h.file), func(err error) tea.Cmd {
+				switch {
+				case errors.Is(err, typing.ErrMenu) && m.handoffs[pane] == nil:
+					m.handoffs[pane] = h
+				case err != nil:
+					m.err = typeError(h.name, err)
+				}
+				return nil
+			}))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -136,16 +187,41 @@ func written(file string, since time.Time) bool {
 	return err == nil && info.ModTime().After(since)
 }
 
-func (m *model) typeIn(pane, text string) tea.Cmd {
-	t := m.ops.T
-	return func() tea.Msg {
-		if _, err := t.Run("send-keys", "-t", pane, "-l", text); err != nil {
-			return errMsg{err}
-		}
-		time.Sleep(200 * time.Millisecond)
-		if _, err := t.Run("send-keys", "-t", pane, "Enter"); err != nil {
-			return errMsg{err}
-		}
-		return nil
+type typedMsg struct {
+	pane string
+	err  error
+	then func(error) tea.Cmd
+}
+
+func (m *model) typeIn(r deck.Row, text string, then func(error) tea.Cmd) tea.Cmd {
+	if m.typing == nil {
+		m.typing = map[string]bool{}
 	}
+	m.typing[r.PaneID] = true
+	t, id, pane, text := m.ops.T, r.SessionID, r.PaneID, textclean.Clean(text)
+	return func() tea.Msg {
+		return typedMsg{pane: pane, err: typing.Type(t, id, pane, text), then: then}
+	}
+}
+
+func (m *model) typed(msg typedMsg) tea.Cmd {
+	delete(m.typing, msg.pane)
+	if msg.then != nil {
+		return msg.then(msg.err)
+	}
+	return nil
+}
+
+func typeError(name string, err error) error {
+	switch {
+	case errors.Is(err, typing.ErrMenu):
+		return fmt.Errorf("%s shows a menu; try again when it waits", name)
+	case errors.Is(err, typing.ErrPasted):
+		return fmt.Errorf("%s started asking; the text waits in its prompt", name)
+	}
+	return err
+}
+
+func (m *model) canType(r deck.Row) bool {
+	return !waitsForIdle(r) && !m.in.Events[r.SessionID].Menu() && !m.typing[r.PaneID]
 }

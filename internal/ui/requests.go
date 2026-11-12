@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/typing"
 )
 
 const requestMemory = 2 * time.Minute
@@ -47,6 +49,10 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 		}
 		m.requests[req.ID] = now
 		req.Caller = m.callerOf(req)
+		if req.Caller == "" {
+			cmds = append(cmds, m.answer(req.ID, ctl.Reply{Err: "run this from a deckhand session"}))
+			continue
+		}
 		if strings.HasPrefix(req.Op, "sub-") {
 			cmds = append(cmds, m.subRequest(req))
 			continue
@@ -62,12 +68,15 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 }
 
 func (m *model) callerOf(req ctl.Request) string {
+	if req.Pane == "" {
+		return req.Caller
+	}
 	for id, pane := range m.in.Panes {
-		if req.Pane != "" && pane == req.Pane {
+		if pane == req.Pane {
 			return id
 		}
 	}
-	return req.Caller
+	return ""
 }
 
 func (m *model) handleRequest(req ctl.Request) tea.Cmd {
@@ -119,28 +128,28 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	if r.Kind != deck.Live || m.resuming[r.SessionID] {
 		return fail("%s is not running", r.Name)
 	}
+	if m.slot == r.PaneID && !m.focused {
+		return fail("the user is in %s now; try again later", r.Name)
+	}
 	if req.Op == "close" {
 		return m.suspend(r, req.ID)
 	}
 	switch {
-	case m.in.Events[r.SessionID].Menu():
+	case r.Asking || m.in.Events[r.SessionID].Menu():
 		return fail("%s shows a menu; ask the user", r.Name)
-	case m.slot == r.PaneID && !m.focused:
-		return fail("the user is in %s now; try again later", r.Name)
+	case r.Busy || m.typing[r.PaneID]:
+		return fail("%s is working; try again when it waits", r.Name)
 	case m.handoffs[r.PaneID] != nil:
 		return fail("%s is handing off; try again later", r.Name)
 	}
 	if req.Op == "send" {
-		return m.typeAndAnswer(r.PaneID, "[via assistant] "+req.Text, req.ID, "sent")
-	}
-	if why := m.handoffRefusal(r); why != "" {
-		return fail("%s", why)
+		return m.typeIn(r, "[via assistant] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
 	}
 	prompt, err := m.beginHandoff(r)
 	if err != nil {
 		return fail("%s", err)
 	}
-	return m.typeAndAnswer(r.PaneID, prompt, req.ID, "handed off")
+	return m.typeIn(r, prompt, m.handoffTyped(r.PaneID, m.replyTyped(req.ID, r.Name, "handed off")))
 }
 
 func (m *model) answer(id string, rep ctl.Reply) tea.Cmd {
@@ -161,18 +170,15 @@ func forRequest(cmd tea.Cmd, id, out string) tea.Cmd {
 	}
 }
 
-func (m *model) typeAndAnswer(pane, text, id, out string) tea.Cmd {
-	typing, home := m.typeIn(pane, text), m.home
-	return func() tea.Msg {
-		msg := typing()
-		rep := ctl.Reply{Out: out}
-		if e, ok := msg.(errMsg); ok {
-			rep = ctl.Reply{Err: e.err.Error()}
+func (m *model) replyTyped(id, name, out string) func(error) tea.Cmd {
+	return func(err error) tea.Cmd {
+		switch {
+		case errors.Is(err, typing.ErrMenu):
+			return m.answer(id, ctl.Reply{Err: name + " shows a menu; ask the user"})
+		case err != nil:
+			return m.answer(id, ctl.Reply{Err: typeError(name, err).Error()})
 		}
-		if err := ctl.Answer(home, id, rep); err != nil {
-			return errMsg{err}
-		}
-		return msg
+		return m.answer(id, ctl.Reply{Out: out})
 	}
 }
 

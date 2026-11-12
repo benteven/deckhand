@@ -42,6 +42,7 @@ type Row struct {
 	Agents          []transcript.Agent
 	Num             int
 	Assistant       bool
+	Paused          bool
 	Parent          string
 	Orphan          string
 }
@@ -218,6 +219,7 @@ func arrange(state store.State, rows []Row) []Row {
 	}
 	if i, ok := byID[state.Assistant.ID]; ok && state.Assistant.ID != "" && !child[state.Assistant.ID] {
 		rows[i].Assistant = true
+		rows[i].Paused = state.Assistant.Paused
 		emit(i)
 	}
 	for i, r := range rows {

@@ -289,6 +289,7 @@ type model struct {
 	restartDue   bool
 	notes        []string
 	reprompt     time.Time
+	typing       map[string]bool
 }
 
 func Run(version string) error {
@@ -346,7 +347,6 @@ func Run(version string) error {
 		want:        &slotWant{},
 		saver:       &stateSaver{},
 		starts:      &pidStarts{at: map[paneProc]time.Time{}},
-		focused:     true,
 		prs:         loadedPRs(saved),
 		prSem:       make(chan struct{}, prParallel),
 		prSaver:     &prSaver{},
@@ -458,6 +458,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.gotTextHits(msg)
 	case startedMsg:
 		return m, m.started(msg)
+	case typedMsg:
+		return m, m.typed(msg)
+	case worktreeRemovedMsg:
+		return m, m.worktreeRemoved(msg)
 	case subCreatedMsg:
 		return m, m.subCreated(msg)
 	case cleanupMsg:
@@ -639,6 +643,10 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "d":
 		r, ok := m.current()
 		if !ok || r.Kind != deck.Suspended || m.resuming[r.SessionID] {
+			return nil
+		}
+		if r.Assistant {
+			m.hint = "The assistant cannot be deleted"
 			return nil
 		}
 		m.del = &deleteDialog{row: r}
@@ -1321,6 +1329,7 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 		old := p.SessionID
 		entry := &m.state.Active[k]
 		entry.SessionID, entry.Name = next.SessionID, ""
+		m.remapSubs(old, next.SessionID)
 		if m.isAssistant(old) {
 			m.setAssistantID(next.SessionID)
 			m.reprompt = time.Now()
@@ -1459,6 +1468,9 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 func (m *model) rebuild() (moved bool) {
 	before := m.selected
 	m.in.State = m.state
+	if !m.ops.Cfg.Assistant {
+		m.in.State.Assistant = store.Assistant{}
+	}
 	m.active, m.suspended = deck.Build(m.in)
 	m.labelReviews()
 	if d := m.rename; d != nil {

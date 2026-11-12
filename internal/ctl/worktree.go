@@ -22,10 +22,13 @@ func Worktree(repo, name string) string {
 }
 
 func git(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
-		if text := strings.TrimSpace(string(out)); text != "" {
-			return "", errors.New(text[strings.LastIndex(text, "\n")+1:])
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			if text := strings.TrimSpace(string(exit.Stderr)); text != "" {
+				return "", errors.New(text[strings.LastIndex(text, "\n")+1:])
+			}
 		}
 		return "", err
 	}
@@ -91,6 +94,9 @@ func exclude(repo string) error {
 func Remove(repo, name string, trash func(...string) error) error {
 	if !ValidName(name) {
 		return fmt.Errorf("not a subsession name: %s", name)
+	}
+	if !filepath.IsAbs(repo) {
+		return fmt.Errorf("not an absolute repo path: %q", repo)
 	}
 	if err := trash(Worktree(repo, name)); err != nil {
 		return err

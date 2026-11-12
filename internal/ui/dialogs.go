@@ -468,7 +468,11 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 	}
 	if fresh == "" && m.continueAfter[r.SessionID] {
 		delete(m.continueAfter, r.SessionID)
-		prompt = "continue"
+		if prompt == "" {
+			prompt = "continue"
+		} else {
+			prompt += " Then continue."
+		}
 	}
 	m.resuming[r.SessionID] = true
 	m.markEnding(r.SessionID)
@@ -552,13 +556,38 @@ func (m *model) moveSession(from, to string) {
 	if m.selected == from {
 		m.selected = to
 	}
+	m.remapSubs(from, to)
+}
+
+func (m *model) remapSubs(from, to string) {
+	for i := range m.state.Subs {
+		if m.state.Subs[i].ID == from {
+			m.state.Subs[i].ID = to
+		}
+		if m.state.Subs[i].Parent == from {
+			m.state.Subs[i].Parent = to
+		}
+	}
+	for i, id := range m.state.Cleanups {
+		if id == from {
+			m.state.Cleanups[i] = to
+		}
+	}
+	if m.cleanup != nil && m.cleanup.sub.ID == from {
+		m.cleanup.sub.ID = to
+	}
 }
 
 const cleanupGuard = time.Second
 
 type cleanupDialog struct {
-	sub    store.Subsession
-	opened time.Time
+	sub     store.Subsession
+	lastKey time.Time
+}
+
+type worktreeRemovedMsg struct {
+	id  string
+	err error
 }
 
 func (d *cleanupDialog) view(w, h int) string {
@@ -570,8 +599,10 @@ func (d *cleanupDialog) view(w, h int) string {
 }
 
 func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
-	if time.Since(m.cleanup.opened) < cleanupGuard || (key != "y" && key != "n" && key != "esc") {
+	key, now := msg.String(), time.Now()
+	quiet := now.Sub(m.cleanup.lastKey) >= cleanupGuard
+	m.cleanup.lastKey = now
+	if !quiet || (key != "y" && key != "n" && key != "esc") {
 		return nil
 	}
 	sub := m.cleanup.sub
@@ -582,10 +613,7 @@ func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.err = fmt.Errorf("%s is running; the worktree stays", sub.Name)
 	} else if key == "y" {
 		cmds = append(cmds, func() tea.Msg {
-			if err := ctl.Remove(sub.Repo, sub.Name, deck.Trash); err != nil {
-				return errMsg{err}
-			}
-			return nil
+			return worktreeRemovedMsg{id: sub.ID, err: ctl.Remove(sub.Repo, sub.Name, deck.Trash)}
 		})
 	}
 	if next := m.nextCleanup(); next != nil {
@@ -594,4 +622,14 @@ func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
 		cmds = append(cmds, m.zoom(false))
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.err = msg.err
+		return nil
+	}
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == msg.id })
+	m.rebuild()
+	return m.saveState()
 }
