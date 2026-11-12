@@ -1,6 +1,7 @@
 package events
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -29,4 +30,20 @@ func TestWaiting(t *testing.T) {
 	}
 	s, _ := Read(dir, "s1")
 	assert.Equal(t, now.Add(4*time.Second).Unix(), s.PromptAt.Unix())
+}
+
+func TestNotificationNeed(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	require.NoError(t, RunHook(dir, strings.NewReader(`{"session_id":"s1","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`), now))
+	s, err := Read(dir, "s1")
+	require.NoError(t, err)
+	assert.True(t, s.Menu())
+	assert.Equal(t, "Claude needs your permission to use Bash", s.Message)
+
+	require.NoError(t, RunHook(dir, strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`), now.Add(time.Second)))
+	s, err = Read(dir, "s1")
+	require.NoError(t, err)
+	assert.False(t, s.Menu())
+	assert.Empty(t, s.Message)
 }
