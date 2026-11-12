@@ -159,7 +159,7 @@ type position struct {
 
 type startedMsg struct {
 	id, cwd, name, pane string
-	err                 error
+	err, warn           error
 	rev                 *review.State
 	req, out            string
 	background          bool
@@ -1101,6 +1101,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		}
 		return m.zoom(false)
 	}
+	if msg.warn != nil {
+		m.err = msg.warn
+	}
 	if msg.rev != nil {
 		m.reviewStarted(msg.id, *msg.rev)
 	}
@@ -1665,23 +1668,25 @@ func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
 	account = m.launchAccount(id, account)
 	start := m.starter(m.ops, id)
 	return func() tea.Msg {
-		pane, err := start(deck.Launch{Cwd: cwd, SessionID: id, Name: name, Account: account, Prompt: prompt})
-		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err}
+		pane, warn, err := start(deck.Launch{Cwd: cwd, SessionID: id, Name: name, Account: account, Prompt: prompt})
+		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err, warn: warn}
 	}
 }
 
-func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (string, error) {
+func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (pane string, warn, err error) {
 	home, role, model := m.home, m.state.Roles[id], m.modelFor(id)
-	return func(l deck.Launch) (string, error) {
+	return func(l deck.Launch) (string, error, error) {
 		l.Model = model
+		var warn error
 		if role != "" {
-			r, err := roles.Find(home, ctl.TopLevel(l.Cwd), role)
-			if err != nil {
-				return "", err
+			if r, err := roles.Find(home, ctl.TopLevel(l.Cwd), role); err == nil {
+				l.System = r.Body
+			} else {
+				warn = fmt.Errorf("role %s not found; started without it", role)
 			}
-			l.System = r.Body
 		}
-		return ops.Start(l)
+		pane, err := ops.Start(l)
+		return pane, warn, err
 	}
 }
 
@@ -1702,8 +1707,8 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 		if st, ok, _ := review.Load(home, r.SessionID); ok {
 			rev = &st
 		}
-		pane, err := start(deck.Launch{Cwd: r.Cwd, SessionID: r.SessionID, Name: name, Account: account, Prompt: prompt, Resume: true})
-		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, rev: rev}
+		pane, warn, err := start(deck.Launch{Cwd: r.Cwd, SessionID: r.SessionID, Name: name, Account: account, Prompt: prompt, Resume: true})
+		return startedMsg{id: r.SessionID, cwd: r.Cwd, name: r.Name, pane: pane, err: err, warn: warn, rev: rev}
 	}
 }
 

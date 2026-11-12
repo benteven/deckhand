@@ -425,9 +425,9 @@ func (m *model) withoutGone(files []transcript.File) []transcript.File {
 type restartDialog struct{ row deck.Row }
 
 type restartedMsg struct {
-	row      deck.Row
-	id, pane string
-	err      error
+	row       deck.Row
+	id, pane  string
+	err, warn error
 
 	stopFailed bool
 }
@@ -500,8 +500,8 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 		if err := ops.Stop(r.PaneID, r.Busy); err != nil {
 			return restartedMsg{row: r, err: err, stopFailed: true}
 		}
-		pane, err := start(deck.Launch{Cwd: r.Cwd, SessionID: id, Name: name, Account: account, Prompt: prompt, Resume: fresh == ""})
-		return restartedMsg{row: r, id: id, pane: pane, err: err}
+		pane, warn, err := start(deck.Launch{Cwd: r.Cwd, SessionID: id, Name: name, Account: account, Prompt: prompt, Resume: fresh == ""})
+		return restartedMsg{row: r, id: id, pane: pane, err: err, warn: warn}
 	}
 	return tea.Sequence(m.showSelected(), run)
 }
@@ -525,6 +525,9 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	late := id == m.state.Assistant.ID && m.stopAssistant
+	if msg.warn != nil {
+		m.err = msg.warn
+	}
 	if msg.id != id {
 		m.moveSession(id, msg.id)
 		id = msg.id
