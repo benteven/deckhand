@@ -7,8 +7,10 @@ const chat = document.getElementById("chat");
 const chatLines = document.getElementById("chatlines");
 const chatText = document.getElementById("chattext");
 const chatNote = document.getElementById("chatnote");
+const navList = document.getElementById("navlist");
+const navBoard = document.getElementById("navboard");
 
-const state = { view: null, denied: false, drafts: {}, notes: {}, busy: {}, seen: null, chatKey: "" };
+const state = { view: null, denied: false, back: "#/", drafts: {}, notes: {}, busy: {}, seen: null, chatKey: "" };
 
 function token() {
   const m = document.cookie.match(/(?:^|;\s*)deckhand_token=([^;]*)/);
@@ -194,13 +196,48 @@ function listPage(v) {
   ];
 }
 
+const stages = [
+  ["building", "Building", "Nothing is building."],
+  ["testing", "Testing", "Nothing is in testing."],
+  ["review", "In review", "Nothing is in review."],
+];
+
+function card(t) {
+  return el(
+    "li",
+    {},
+    el(
+      "a",
+      { class: "card" + (t.status === "needs-you" ? " needs-you" : ""), href: "#/task/" + encodeURIComponent(t.id), "data-key": "b:" + t.id },
+      el("span", { class: "title", text: t.title || t.id }),
+      t.project_name ? el("span", { class: "project", text: t.project_name }) : null,
+      el("span", { class: "need", text: line(t) }),
+    ),
+  );
+}
+
+function boardPage(v) {
+  const ts = v.tasks || [];
+  return [
+    el("div", { class: "board" }, stages.map(([stage, name, empty]) => {
+      const cards = ts.filter((t) => t.stage === stage).map(card);
+      return el(
+        "section",
+        { class: "column" },
+        el("h2", {}, name, cards.length ? el("span", { class: "count", text: String(cards.length) }) : null),
+        cards.length ? el("ul", { class: "cards" }, cards) : el("p", { class: "empty", text: empty }),
+      );
+    })),
+  ];
+}
+
 function prLabel(url) {
   const m = /\/pull\/(\d+)/.exec(url);
   return m ? "PR #" + m[1] : "PR";
 }
 
 function taskPage(v, id) {
-  const back = el("a", { class: "back", href: "#/", "data-key": "back", text: "All tasks" });
+  const back = el("a", { class: "back", href: state.back, "data-key": "back", text: state.back === "#/board" ? "Board" : "All tasks" });
   const t = (v.tasks || []).find((x) => x.id === id);
   if (!t) return [back, el("p", { class: "empty", text: "This task is not open. It may be done." })];
   const key = "t:" + t.id;
@@ -250,20 +287,24 @@ function taskPage(v, id) {
 
 function route() {
   const m = /^#\/task\/(.+)$/.exec(location.hash);
-  return m ? decodeURIComponent(m[1]) : "";
+  if (m) return { task: decodeURIComponent(m[1]) };
+  return { board: location.hash === "#/board" };
 }
 
 function render() {
   const a = document.activeElement;
   const key = a && app.contains(a) && a.dataset ? a.dataset.key : "";
   const sel = key && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
+  const r = route();
+  if (!r.task) state.back = r.board ? "#/board" : "#/";
+  for (const [n, on] of [[navList, !r.task && !r.board], [navBoard, !!r.board]]) {
+    if (on) n.setAttribute("aria-current", "page");
+    else n.removeAttribute("aria-current");
+  }
   let body;
   if (state.denied) body = [el("p", { class: "empty", text: "This page needs its key. Open it from deckhand." })];
   else if (!state.view) body = [el("p", { class: "empty", text: "Loading." })];
-  else {
-    const id = route();
-    body = id ? taskPage(state.view, id) : listPage(state.view);
-  }
+  else body = r.task ? taskPage(state.view, r.task) : r.board ? boardPage(state.view) : listPage(state.view);
   app.replaceChildren(...body.filter(Boolean));
   if (key) {
     const n = app.querySelector('[data-key="' + CSS.escape(key) + '"]');

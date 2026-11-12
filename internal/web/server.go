@@ -40,6 +40,7 @@ type View struct {
 type TaskView struct {
 	tasks.Task
 	ProjectName string   `json:"project_name,omitempty"`
+	Stage       string   `json:"stage,omitempty"`
 	Menu        []string `json:"menu,omitempty"`
 	Screen      string   `json:"screen,omitempty"`
 }

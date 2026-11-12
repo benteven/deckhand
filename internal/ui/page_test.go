@@ -7,6 +7,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
+	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tasks"
 	"github.com/benteven/deckhand/internal/web"
 )
@@ -36,4 +37,27 @@ func TestNotifyKeepsTextOutOfScript(t *testing.T) {
 		}
 		assert.Equal(t, "--", args[len(args)-3], goos)
 	}
+}
+
+func TestPageStage(t *testing.T) {
+	m := &model{
+		tasks: []tasks.Task{
+			{ID: "review", Session: "s1", Project: "p", Dir: "/a", PR: "https://x/pull/1", Status: "working"},
+			{ID: "testing", Session: "s2", Project: "p", Dir: "/b", PR: "https://x/pull/2", Status: "working"},
+			{ID: "building", Session: "s3", Project: "p", Dir: "/c", Status: "needs-you"},
+			{ID: "none", Status: "todo"},
+		},
+		prs: map[string]*prEntry{"https://x/pull/1": {state: "open"}, "https://x/pull/2": {state: "merged"}},
+		state: store.State{
+			Subs:  []store.Subsession{{ID: "r1", Parent: "p", Dir: "/a"}, {ID: "r2", Parent: "p", Dir: "/b"}, {ID: "r3", Parent: "p", Dir: "/c"}, {ID: "s3", Parent: "p", Dir: "/c"}},
+			Roles: map[string]string{"r1": "tester", "r2": "tester", "r3": "tester", "s3": "task"},
+		},
+		active:    []deck.Row{{SessionID: "r1", Kind: deck.Live}, {SessionID: "r2", Kind: deck.Live}, {SessionID: "s3", Kind: deck.Live}},
+		suspended: []deck.Row{{SessionID: "r3", Kind: deck.Suspended}},
+	}
+	got := map[string]string{}
+	for _, tv := range m.pageView().Tasks {
+		got[tv.ID] = tv.Stage
+	}
+	assert.Equal(t, map[string]string{"review": "review", "testing": "testing", "building": "building", "none": ""}, got)
 }

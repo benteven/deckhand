@@ -143,7 +143,7 @@ func (m *model) pageView() web.View {
 	tasks.Sort(open)
 	v := web.View{Chat: m.chat, Waiting: m.waitingSessions()}
 	for _, t := range open {
-		tv := web.TaskView{Task: t}
+		tv := web.TaskView{Task: t, Stage: m.taskStage(t)}
 		if t.Project != "" {
 			tv.ProjectName = m.sessionName(t.Project)
 		}
@@ -157,6 +157,21 @@ func (m *model) pageView() web.View {
 	}
 	v.Count += len(v.Waiting)
 	return v
+}
+
+func (m *model) taskStage(t tasks.Task) string {
+	switch {
+	case t.Session == "" || t.Status == "done":
+		return ""
+	case t.PR != "" && m.prState(t.PR).state == "open":
+		return "review"
+	case t.Dir != "" && slices.ContainsFunc(m.state.Subs, func(s store.Subsession) bool {
+		r, ok := m.rowByID(s.ID)
+		return s.Parent == t.Project && s.Dir == t.Dir && m.helperRole(s.ID) && ok && (r.Kind == deck.Live || r.Busy)
+	}):
+		return "testing"
+	}
+	return "building"
 }
 
 func (m *model) waitingSessions() []web.SessionView {

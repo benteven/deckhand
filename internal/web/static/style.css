@@ -72,9 +72,28 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
-.home {
-  font-weight: 600;
+.switch {
+  display: flex;
+  gap: 2px;
+  margin-left: -10px;
+}
+
+.switch a {
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--dim);
+  font-weight: 500;
   text-decoration: none;
+}
+
+.switch a:hover {
+  color: var(--fg);
+}
+
+.switch a[aria-current] {
+  background: var(--hover);
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .status {
@@ -99,6 +118,7 @@ h2 {
 }
 
 .group h2,
+.column h2,
 .block h2 {
   display: flex;
   align-items: baseline;
@@ -195,6 +215,59 @@ h2 {
 
 .tag.urgent {
   color: var(--urgent);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  text-decoration: none;
+}
+
+.card:hover {
+  border-color: var(--faint);
+}
+
+.card.needs-you {
+  padding-left: 8px;
+  border-left: 3px solid var(--need);
+}
+
+.card .title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.card .project {
+  margin-left: 0;
+}
+
+.card.needs-you .need {
+  color: var(--need);
+}
+
+.column .empty {
+  padding: 4px 0;
 }
 
 .rowside {
@@ -538,6 +611,13 @@ kbd {
 .chatfoot .note {
   flex: 1;
   margin: 0;
+}
+
+@media (max-width: 640px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
 }
 
 @media (max-width: 520px) {
