@@ -684,7 +684,7 @@ func (m *model) runningIn(dir string) (string, bool) {
 		if s.Dir != dir {
 			continue
 		}
-		if r, ok := m.rowByID(s.ID); m.resuming[s.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere) {
+		if r, ok := m.rowByID(s.ID); m.resuming[s.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "") {
 			return s.Name, true
 		}
 	}

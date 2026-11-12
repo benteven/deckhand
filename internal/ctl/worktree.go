@@ -145,6 +145,10 @@ func Remove(repo, name string, trash func(...string) error) error {
 	if err := trash(Worktree(repo, name)); err != nil {
 		return err
 	}
+	return Prune(repo)
+}
+
+func Prune(repo string) error {
 	_, err := git(repo, "worktree", "prune")
 	return err
 }

@@ -747,7 +747,7 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 		entries[k], drop = m.detach(r)
 		cmds = append(cmds, drop)
 	}
-	ops, pr, noGH := m.ops, t.PR, m.noGH
+	ops, pr, branch, noGH := m.ops, t.PR, t.Branch, m.noGH
 	merged := m.merged(t)
 	run := func() tea.Msg {
 		msg := taskClosedMsg{id: sub.ID}
@@ -763,6 +763,10 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 			state, _, err := gh.State(pr)
 			merged = err == nil && state == "merged"
 		}
+		if merged = merged && !noGH; merged {
+			info, err := gh.Info(pr)
+			merged = err == nil && info.Head == branch
+		}
 		if !merged {
 			msg.ask = true
 			return msg
@@ -771,6 +775,8 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 			if msg.err = ctl.Remove(sub.Repo, sub.Name, deck.Trash); msg.err != nil {
 				return msg
 			}
+		} else if msg.err = ctl.Prune(sub.Repo); msg.err != nil {
+			return msg
 		}
 		msg.removed = true
 		msg.err = ctl.DeleteBranch(sub.Repo, sub.Branch)
@@ -785,6 +791,7 @@ func (m *model) taskClosed(msg taskClosedMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		m.err = msg.err
+		delete(m.closing, msg.id)
 	}
 	if msg.ask {
 		if i, ok := m.taskOf(msg.id); ok {
