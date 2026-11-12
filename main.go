@@ -16,6 +16,7 @@ import (
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/preview"
 	"github.com/benteven/deckhand/internal/reviewui"
+	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
@@ -193,6 +194,9 @@ func setup() (tmux.Client, store.Config, string, error) {
 	}
 	if cfg.Assistant {
 		if err := ctl.WriteInstructions(filepath.Join(home, "assistant")); err != nil {
+			return tmux.Client{}, cfg, "", err
+		}
+		if err := roles.WriteDefaults(home); err != nil {
 			return tmux.Client{}, cfg, "", err
 		}
 	}
