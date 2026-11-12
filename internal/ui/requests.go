@@ -143,7 +143,7 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("%s is handing off; try again later", r.Name)
 	}
 	if req.Op == "send" {
-		return m.typeIn(r, "[via assistant] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
+		return m.typeIn(r, viaAssistant(req.Text), m.replyTyped(req.ID, r.Name, "sent"))
 	}
 	prompt, err := m.beginHandoff(r)
 	if err != nil {
@@ -233,5 +233,17 @@ func (m *model) searchRequest(req ctl.Request) tea.Cmd {
 			return errMsg{err}
 		}
 		return nil
+	}
+}
+
+const viaMark = "[via assistant]"
+
+func viaAssistant(text string) string {
+	for {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(text), viaMark)
+		if !ok {
+			return viaMark + " " + strings.TrimSpace(text)
+		}
+		text = rest
 	}
 }

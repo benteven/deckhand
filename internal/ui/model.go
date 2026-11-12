@@ -278,6 +278,7 @@ type model struct {
 	handoffs map[string]*pendingHandoff
 
 	agentMode bool
+	assist    *assistantDialog
 	agent     string
 	gone      map[string]bool
 	quitting  bool
@@ -535,6 +536,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.restart != nil {
 			return m, m.restartKey(msg)
 		}
+		if m.assist != nil {
+			return m, m.assistantKey(msg)
+		}
 		if m.handoff != nil {
 			return m, m.handoffKey(msg)
 		}
@@ -663,6 +667,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.toggleAgentMode()
+	case "G":
+		m.assist = &assistantDialog{on: !m.ops.Cfg.Assistant}
+		return m.zoom(true)
 	case "c":
 		if r, ok := m.current(); ok {
 			return m.startHandoff(r)
@@ -717,7 +724,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) dialogOpen() bool {
-	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
+	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.assist != nil || m.handoff != nil || m.help != nil || m.accounts != nil
 }
 
 func (m *model) liveRows() []deck.Row {

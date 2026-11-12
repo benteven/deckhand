@@ -93,6 +93,7 @@ In the list:
 | `A` | Switch account for this session or all sessions, add or remove accounts |
 | `c` | Hand off: Claude writes its state to a note, the deck runs `/clear`, then Claude reads the note back |
 | `g` | Agent mode: `j`/`k` also step through subagents and show the live subagent transcript; Enter opens the parent session |
+| `G` | Turn the assistant on or off |
 | `t` | Take over a session running in another terminal; on your own session, move it to the next account |
 | `o` | Open the row's pull requests |
 | `v` | Review the row's pull requests and the rest of their stack, in merge order. In the review: `j`/`k` move, `n`/`N` change, `]`/`[` file, `J`/`K` PR, `t` tests and generated files, `c` comment to Claude, `tab` go to Claude |
@@ -124,7 +125,7 @@ When a subsession closes, deckhand asks you what to do with its worktree. Only y
 
 ### Assistant
 
-The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. To turn it on, set `"assistant": true` in `~/.config/deckhand/config.json` and restart deckhand.
+The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. Press `G` in the list to turn it on or off. Deckhand asks first, then writes the folder and starts the assistant at once; it saves `"assistant": true` in `~/.config/deckhand/config.json`. Sessions that already run get the standing rules when you restart them with `R`.
 
 The assistant is the first row in the list, with the gray mark "assistant". It runs in `~/.config/deckhand/assistant`. On the first start deckhand writes `instructions.md` there and never overwrites it, so you can edit it. The assistant keeps its task list in `tasks.md` in the same folder.
 
@@ -143,7 +144,7 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 
 Menus go to you. The assistant never answers a permission prompt or a question menu in another session. When a session starts to wait for you and you are not looking at it, deckhand types a "[deckhand]" note about it into the assistant.
 
-Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand runs `claude update`, then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row stays at the top of Active with the marks "assistant" and "paused", and nothing restarts it until you resume it with Enter.
+Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand updates Claude Code (`brew upgrade --cask claude-code` for a Homebrew install, else `claude update`), then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row stays at the top of Active with the marks "assistant" and "paused", and nothing restarts it until you resume it with Enter.
 
 The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, and marks text that begins with "[via assistant]" as coming from you.
 

@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -193,7 +192,7 @@ func setup() (tmux.Client, store.Config, string, error) {
 		return tmux.Client{}, cfg, "", err
 	}
 	if cfg.Assistant {
-		if err := writeInstructions(filepath.Join(home, "assistant")); err != nil {
+		if err := ctl.WriteInstructions(filepath.Join(home, "assistant")); err != nil {
 			return tmux.Client{}, cfg, "", err
 		}
 	}
@@ -204,21 +203,6 @@ func setup() (tmux.Client, store.Config, string, error) {
 		}
 	}
 	return client, cfg, exe, nil
-}
-
-func writeInstructions(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "instructions.md"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if errors.Is(err, os.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, werr := f.WriteString(ctl.Instructions)
-	return errors.Join(werr, f.Close())
 }
 
 func reload() error {
