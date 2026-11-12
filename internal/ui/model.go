@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"uuid"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -143,6 +142,7 @@ type refreshMsg struct {
 	geoOK     bool
 	accounts  []accounts.Account
 	reviews   map[string]review.State
+	requests  []ctl.Request
 	err       error
 }
 
@@ -160,6 +160,7 @@ type startedMsg struct {
 	id, cwd, name, pane string
 	err                 error
 	rev                 *review.State
+	req, out            string
 }
 
 type errMsg struct{ err error }
@@ -279,6 +280,7 @@ type model struct {
 	gone      map[string]bool
 	quitting  bool
 	inDialog  bool
+	requests  map[string]time.Time
 }
 
 func Run(version string) error {
@@ -423,7 +425,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, next
 		}
-		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), m.apply(msg))
+		applied := m.apply(msg)
+		return m, tea.Batch(next, m.dragged(msg.geo, msg.geoOK), applied, m.handleRequests(msg.requests))
 	case prStateMsg:
 		e := m.prs[msg.url]
 		if e == nil {
@@ -830,19 +833,32 @@ func (m *model) confirmRename(d *renameDialog) tea.Cmd {
 	if i < 0 || m.shown()[i].Kind != deck.Live || m.shown()[i].PaneID != d.pane {
 		return m.saveState()
 	}
-	d.busy = m.shown()[i].Busy
+	return m.suspend(m.shown()[i], "")
+}
+
+func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 	var entry store.ActiveEntry
 	for _, e := range m.state.Active {
-		if e.SessionID == d.id {
+		if e.SessionID == r.SessionID {
 			entry = e
 		}
 	}
-	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == d.id })
-	m.markEnding(d.id)
+	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == r.SessionID })
+	m.markEnding(r.SessionID)
 	m.rebuild()
-	ops, pane, busy := m.ops, d.pane, d.busy
+	ops, pane, busy, home := m.ops, r.PaneID, r.Busy, m.home
 	stop := func() tea.Msg {
-		if err := ops.Stop(pane, busy); err != nil {
+		err := ops.Stop(pane, busy)
+		if req != "" {
+			rep := ctl.Reply{Out: "closed"}
+			if err != nil {
+				rep = ctl.Reply{Err: err.Error()}
+			}
+			if aerr := ctl.Answer(home, req, rep); aerr != nil && err == nil {
+				return errMsg{aerr}
+			}
+		}
+		if err != nil {
 			return stopFailedMsg{entry: entry, err: err}
 		}
 		return nil
@@ -998,6 +1014,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	inBatch := m.batch[msg.id]
 	delete(m.batch, msg.id)
 	if msg.err != nil {
+		if msg.req != "" {
+			return m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
+		}
 		m.err = msg.err
 		if inBatch {
 			return m.finishBatch()
@@ -1007,7 +1026,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.rev != nil {
 		m.reviewStarted(msg.id, *msg.rev)
 	}
-	m.setMode(modeActive)
+	if msg.req == "" {
+		m.setMode(modeActive)
+	}
 	entry := store.ActiveEntry{SessionID: msg.id, Cwd: msg.cwd, Name: msg.name, LastInteraction: time.Now()}
 	if i := slices.IndexFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == msg.id }); i >= 0 {
 		if inBatch {
@@ -1022,6 +1043,10 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	m.in.Panes[msg.id] = msg.pane
+	if msg.req != "" {
+		m.rebuild()
+		return tea.Batch(m.saveState(), m.answer(msg.req, ctl.Reply{Out: msg.out}))
+	}
 	if inBatch {
 		m.rebuild()
 		return tea.Batch(m.saveState(), m.finishBatch())
@@ -1161,6 +1186,7 @@ func (m *model) refresh() tea.Cmd {
 		}
 		msg.accounts = accounts.List(home, claudeHome)
 		msg.reviews = review.LoadAll(home)
+		msg.requests = ctl.Pending(home)
 		if save {
 			reader.Save()
 		}
@@ -1516,7 +1542,10 @@ func (m *model) tmux(args ...string) tea.Cmd {
 func (m *model) saveState() tea.Cmd {
 	sv, home := m.saver, m.home
 	sv.mu.Lock()
-	sv.state = store.State{Names: maps.Clone(m.state.Names), Active: slices.Clone(m.state.Active), Account: m.state.Account, Accounts: maps.Clone(m.state.Accounts), Limits: maps.Clone(m.state.Limits), Fallbacks: maps.Clone(m.state.Fallbacks)}
+	st := m.state
+	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
+	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
+	sv.state = st
 	sv.mu.Unlock()
 	return func() tea.Msg {
 		sv.mu.Lock()
@@ -1528,8 +1557,7 @@ func (m *model) saveState() tea.Cmd {
 	}
 }
 
-func (m *model) start(cwd, account string) tea.Cmd {
-	id := uuid.NewV4().String()
+func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
 	if account != m.state.Account {
 		if m.state.Accounts == nil {
 			m.state.Accounts = map[string]string{}
@@ -1539,8 +1567,8 @@ func (m *model) start(cwd, account string) tea.Cmd {
 	account = m.launchAccount(id, account)
 	ops := m.ops
 	return func() tea.Msg {
-		pane, err := ops.Start(cwd, id, "", false, account, "")
-		return startedMsg{id: id, cwd: cwd, pane: pane, err: err}
+		pane, err := ops.Start(cwd, id, name, false, account, prompt)
+		return startedMsg{id: id, cwd: cwd, name: name, pane: pane, err: err}
 	}
 }
 

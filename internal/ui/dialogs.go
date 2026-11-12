@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"uuid"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -148,7 +149,7 @@ func (m *model) pickerKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.picker = nil
-		return m.start(p.shown[p.cursor], p.account)
+		return m.start(uuid.NewV4().String(), p.shown[p.cursor], "", p.account, "")
 	case "ctrl+a":
 		if len(p.accounts) > 1 {
 			p.account = nextAccount(p.accounts, p.account)

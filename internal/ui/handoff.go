@@ -36,18 +36,25 @@ func (d *handoffDialog) view(w, h int) string {
 }
 
 func (m *model) startHandoff(r deck.Row) tea.Cmd {
-	switch {
-	case m.mode != modeActive || r.Kind != deck.Live || m.resuming[r.SessionID]:
+	if m.mode != modeActive || r.Kind != deck.Live || m.resuming[r.SessionID] {
 		return nil
-	case m.handoffs[r.PaneID] != nil:
-		m.hint = "A handoff is already running for this session"
-		return nil
-	case r.Busy:
-		m.hint = "The session is busy. Try again when it is idle"
+	}
+	if why := m.handoffRefusal(r); why != "" {
+		m.hint = why
 		return nil
 	}
 	m.handoff = &handoffDialog{row: r}
 	return m.zoom(true)
+}
+
+func (m *model) handoffRefusal(r deck.Row) string {
+	switch {
+	case m.handoffs[r.PaneID] != nil:
+		return "A handoff is already running for this session"
+	case r.Busy:
+		return "The session is busy. Try again when it is idle"
+	}
+	return ""
 }
 
 func (m *model) handoffKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -55,23 +62,30 @@ func (m *model) handoffKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "y":
 		r := m.handoff.row
 		m.handoff = nil
-		file := filepath.Join(m.home, "handoffs", r.SessionID+".md")
-		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		prompt, err := m.beginHandoff(r)
+		if err != nil {
 			m.err = err
 			return m.zoom(false)
 		}
-		if m.handoffs == nil {
-			m.handoffs = map[string]*pendingHandoff{}
-		}
-		m.handoffs[r.PaneID] = &pendingHandoff{id: r.SessionID, name: r.Name, file: file, sent: time.Now()}
-		m.hint = "Claude writes the handoff, then the deck clears"
-		prompt := fmt.Sprintf("Write a handoff note to %s so a fresh session can pick up this work: the goal, what is done, what is left, key files and commands, decisions made, and open questions. Replace the file if it exists. Write only that file, then stop.", file)
 		return tea.Sequence(m.zoom(false), m.typeIn(r.PaneID, prompt))
 	case "n", "esc":
 		m.handoff = nil
 		return m.zoom(false)
 	}
 	return nil
+}
+
+func (m *model) beginHandoff(r deck.Row) (string, error) {
+	file := filepath.Join(m.home, "handoffs", r.SessionID+".md")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return "", err
+	}
+	if m.handoffs == nil {
+		m.handoffs = map[string]*pendingHandoff{}
+	}
+	m.handoffs[r.PaneID] = &pendingHandoff{id: r.SessionID, name: r.Name, file: file, sent: time.Now()}
+	m.hint = "Claude writes the handoff, then the deck clears"
+	return fmt.Sprintf("Write a handoff note to %s so a fresh session can pick up this work: the goal, what is done, what is left, key files and commands, decisions made, and open questions. Replace the file if it exists. Write only that file, then stop.", file), nil
 }
 
 func (m *model) advanceHandoffs(now time.Time) tea.Cmd {

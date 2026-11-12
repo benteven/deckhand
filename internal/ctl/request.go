@@ -135,5 +135,8 @@ func Pending(home string) []Request {
 }
 
 func Answer(home, id string, r Reply) error {
+	if _, err := os.Stat(filepath.Join(requestsDir(home), id+".json")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	return writeAtomic(requestsDir(home), id+replySuffix, r)
 }
