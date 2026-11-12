@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/accounts"
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/live"
@@ -539,4 +540,39 @@ func (m *model) moveSession(from, to string) {
 	if m.selected == from {
 		m.selected = to
 	}
+}
+
+type cleanupDialog struct{ sub store.Subsession }
+
+func (d *cleanupDialog) view(w, h int) string {
+	body := []string{
+		normal.Render(ansi.Truncate("Remove the worktree "+ctl.Worktree(d.sub.Repo, d.sub.Name)+" and all its files? (y/n)", w, "…")),
+		gray.Render(ansi.Truncate("The branch "+d.sub.Branch+" stays.", w, "…")),
+	}
+	return page(body, gray.Render(ansi.Truncate("y remove  n keep", w, "")), h)
+}
+
+func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.String()
+	if key != "y" && key != "n" && key != "esc" {
+		return nil
+	}
+	sub := m.cleanup.sub
+	m.cleanup = nil
+	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
+	cmds := []tea.Cmd{m.saveState()}
+	if key == "y" {
+		cmds = append(cmds, func() tea.Msg {
+			if err := ctl.Remove(sub.Repo, sub.Name, deck.Trash); err != nil {
+				return errMsg{err}
+			}
+			return nil
+		})
+	}
+	if next := m.nextCleanup(); next != nil {
+		cmds = append(cmds, next)
+	} else if !m.dialogOpen() {
+		cmds = append(cmds, m.zoom(false))
+	}
+	return tea.Batch(cmds...)
 }

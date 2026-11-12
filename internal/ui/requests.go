@@ -42,10 +42,14 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, req := range pending {
 		waiting[req.ID] = true
-		if _, seen := m.requests[req.ID]; seen || strings.HasPrefix(req.Op, "sub-") {
+		if _, seen := m.requests[req.ID]; seen {
 			continue
 		}
 		m.requests[req.ID] = now
+		if strings.HasPrefix(req.Op, "sub-") {
+			cmds = append(cmds, m.subRequest(req))
+			continue
+		}
 		cmds = append(cmds, m.handleRequest(req))
 	}
 	for id, at := range m.requests {

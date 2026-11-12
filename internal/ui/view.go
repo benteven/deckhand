@@ -66,6 +66,8 @@ func (m *model) View() tea.View {
 	w, h := m.size()
 	var content string
 	switch {
+	case m.cleanup != nil:
+		content = m.cleanup.view(w, h)
 	case m.picker != nil:
 		content = m.picker.view(w, h)
 	case m.prompt != nil:

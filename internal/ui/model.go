@@ -264,6 +264,7 @@ type model struct {
 	handoff        *handoffDialog
 	help           *helpScreen
 	accounts       *accountDialog
+	cleanup        *cleanupDialog
 
 	switches      map[string]bool
 	continueAfter map[string]bool
@@ -354,7 +355,7 @@ func Run(version string) error {
 
 func (m *model) Init() tea.Cmd {
 	home := m.home
-	return tea.Batch(m.refresh(), m.dialogFlag(), func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
+	return tea.Batch(m.refresh(), m.dialogFlag(), m.nextCleanup(), func() tea.Msg { return updateMsg(update.Latest(home, time.Now())) })
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -449,6 +450,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.gotTextHits(msg)
 	case startedMsg:
 		return m, m.started(msg)
+	case subCreatedMsg:
+		return m, m.subCreated(msg)
+	case cleanupMsg:
+		return m, m.queueCleanup(msg.id)
 	case restartedMsg:
 		return m, m.restarted(msg)
 	case takenOverMsg:
@@ -492,6 +497,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		if m.quitting {
 			return m, nil
+		}
+		if m.cleanup != nil {
+			return m, m.cleanupKey(msg)
 		}
 		if m.prompt != nil {
 			return m, m.promptKey(msg)
@@ -680,7 +688,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) dialogOpen() bool {
-	return m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
+	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
 }
 
 func (m *model) liveRows() []deck.Row {
@@ -847,6 +855,7 @@ func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 	m.markEnding(r.SessionID)
 	m.rebuild()
 	ops, pane, busy, home := m.ops, r.PaneID, r.Busy, m.home
+	_, sub := m.state.SubOf(r.SessionID)
 	stop := func() tea.Msg {
 		err := ops.Stop(pane, busy)
 		if req != "" {
@@ -860,6 +869,9 @@ func (m *model) suspend(r deck.Row, req string) tea.Cmd {
 		}
 		if err != nil {
 			return stopFailedMsg{entry: entry, err: err}
+		}
+		if sub {
+			return cleanupMsg{r.SessionID}
 		}
 		return nil
 	}
@@ -1575,7 +1587,11 @@ func (m *model) start(id, cwd, name, account, prompt string) tea.Cmd {
 func (m *model) resume(r deck.Row) tea.Cmd {
 	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
 	name, home := m.state.Names[r.SessionID], m.home
+	sub, isSub := m.state.SubOf(r.SessionID)
 	return func() tea.Msg {
+		if _, err := os.Stat(sub.Dir); isSub && err != nil {
+			return startedMsg{id: r.SessionID, err: fmt.Errorf("the worktree %s was removed", sub.Dir)}
+		}
 		var rev *review.State
 		if st, ok, _ := review.Load(home, r.SessionID); ok {
 			rev = &st
