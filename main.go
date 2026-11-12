@@ -67,7 +67,7 @@ func main() {
 		}
 	case "session":
 		runCtl("session", os.Args[2:])
-	case "sub", "task", "project", "role", "queue":
+	case "sub", "task", "project", "role", "queue", "chat":
 		runCtl(os.Args[1], os.Args[2:])
 	case "page":
 		if err := openPage(); err != nil {

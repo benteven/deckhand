@@ -24,3 +24,16 @@ func TestAnswerRefusedOnMenu(t *testing.T) {
 	assert.Empty(t, m.typing)
 	assert.Empty(t, m.pageAnswers)
 }
+
+func TestNotifyKeepsTextOutOfScript(t *testing.T) {
+	title, need := `x" & (do shell script "touch /tmp/p") & "`, "-u critical"
+	for _, goos := range []string{"darwin", "linux"} {
+		_, args := notifyArgs(goos, title, need)
+		assert.Equal(t, []string{title, need}, args[len(args)-2:], goos)
+		for _, a := range args[:len(args)-2] {
+			assert.NotContains(t, a, "touch", goos)
+			assert.NotContains(t, a, "critical", goos)
+		}
+		assert.Equal(t, "--", args[len(args)-3], goos)
+	}
+}

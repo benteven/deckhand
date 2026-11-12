@@ -68,6 +68,8 @@ func ctlUsage(group string) string {
 		return "usage:\n  deckhand role list\n  deckhand role start ROLE --task ID\n  deckhand role model fable|opus|sonnet\n"
 	case "queue":
 		return "usage:\n  deckhand queue take [NAME]\n  deckhand queue give [NAME]\n  deckhand queue list\n"
+	case "chat":
+		return "usage:\n  deckhand chat reply -- TEXT\n"
 	}
 	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] -- PROMPT\n  deckhand session resume ID\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
@@ -120,6 +122,8 @@ func parseCtl(group string, args []string) (ctl.Request, error) {
 		return parseRole(verb, rest)
 	case "queue":
 		return parseQueue(verb, rest)
+	case "chat":
+		return parseChat(verb, rest)
 	}
 	return parseSession(verb, rest)
 }
@@ -309,4 +313,12 @@ func parseQueue(verb string, rest []string) (ctl.Request, error) {
 		return ctl.Request{Op: "queue-" + verb, Name: name}, nil
 	}
 	return ctl.Request{}, errUsage
+}
+
+func parseChat(verb string, rest []string) (ctl.Request, error) {
+	head, tail, ok := splitDash(rest)
+	if verb != "reply" || !ok || len(head) != 0 || len(tail) == 0 {
+		return ctl.Request{}, errUsage
+	}
+	return ctl.Request{Op: "chat-reply", Text: strings.Join(tail, " ")}, nil
 }

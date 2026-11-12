@@ -127,7 +127,7 @@ When a subsession closes, deckhand asks you what to do with its worktree. Only y
 
 The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. Press `G` in the list to turn it on or off. Deckhand asks first, then writes the folder, saves `"assistant": true` in `~/.config/deckhand/config.json` and starts the assistant. Sessions that already run get the standing rules when you restart them with `R`.
 
-The assistant is the first row in the list, with the gray mark "assistant". It runs in `~/.config/deckhand/assistant`. On the first start deckhand writes `instructions.md` there and never overwrites it, so you can edit it. The assistant keeps its task list in `tasks.md` in the same folder.
+The assistant is the first row in the list, with the gray mark "assistant". It runs in `~/.config/deckhand/assistant`. On the first start deckhand writes `instructions.md` there and never overwrites it, so you can edit it. The assistant keeps your work as tasks; see [Tasks](#tasks).
 
 The assistant has the `sessions` skill, which runs `deckhand session` commands. Only the assistant can run them:
 
@@ -146,7 +146,21 @@ Menus go to you. The assistant never answers a permission prompt or a question m
 
 Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand updates Claude Code (`brew upgrade --cask claude-code` for a Homebrew install, else `claude update`), then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row stays at the top of Active with the marks "assistant" and "paused", and nothing restarts it until you resume it with Enter.
 
-The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, and marks text that begins with "[via assistant]" as coming from you.
+The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, marks text that begins with "[via assistant]" as coming from you, and, when it is a task, keeps its line on the task page current. Each session may also run `deckhand task`, `role` and `queue` without a prompt; the list checks who asks.
+
+### Tasks
+
+With the assistant on, each piece of work is a task. Run `deckhand page` to open the task page in your browser on `http://127.0.0.1:7317` (`"web_port"` in `config.json` changes the port). The page shows tasks that need you at the top, then your to-dos, the tasks at work and the tasks that wait on others. Answer a task or pick a menu option there, open its session in deckhand, or mark it done. `⌘K` opens a chat with the assistant: deckhand types your text into the assistant with the mark "[from the page]", and the assistant answers with `deckhand chat reply -- TEXT`. When no page is open and a task starts to need you, deckhand shows a system notification (`osascript` on macOS, `notify-send` on Linux).
+
+The assistant asks you what it needs, then makes the task with `deckhand task new`. A plain to-do, such as "empty the Trash", has no project; you mark it done. Code work goes to a project: a long-lived session for one area, marked with `deckhand project mark <id>` (`project unmark` and `project list` too). The project starts the task with `deckhand task start <id>` as a fork of its own conversation, in a new worktree from the fetched default branch. The task keeps its line current with `deckhand task update`, and writes a summary with `deckhand task done` when its PR is merged. Deckhand adds the summary to the project's notes file, closes the task, removes the worktree and deletes the branch. A project with no open tasks is suspended after 10 idle minutes.
+
+Roles help a task, for example a tester. A role is a Claude Code agent file (`<name>.md` with `name`, `description` and `model` in its frontmatter, then its instructions). Deckhand writes `project.md`, `task.md` and `tester.md` to `~/.config/deckhand/roles/` once and never overwrites them; add a file there for a new role. A repo can add a role, or replace one of the same name, in `.claude/agents/<name>.md` with `deckhand: role` in the frontmatter. The project runs `deckhand role list` and `deckhand role start <role> --task <id>`; the role runs in the task's worktree.
+
+Models: the assistant runs on Sonnet, projects and tasks on Opus, and the tester on Sonnet; a role file's `model` sets its own. `deckhand task start <id> --model fable` picks another model for one task. A role runs `deckhand role model opus` to restart on another model in the same conversation.
+
+The queue: roles that share ports, a local stack or a database take turns. A role runs `deckhand queue take` before it starts the running system and `deckhand queue give` when it stops it. The queue is per repo; a role file can name another one with `queue:`. `deckhand queue list` shows who has the turn and who waits, and the assistant tells you when a turn is stuck.
+
+A key for the chat on macOS: run `deckhand page` once, so the browser has the page's key. Then open Shortcuts, make a new shortcut with the action "Open URLs" and the URL `http://127.0.0.1:7317/#new`, and in its details add the keyboard shortcut `⌃⌥⌘A`.
 
 ## How it works
 

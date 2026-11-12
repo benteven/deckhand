@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -17,14 +16,21 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tasks"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/typing"
 	"github.com/benteven/deckhand/internal/web"
 )
 
-const screenLines = 30
+const (
+	screenLines = 30
+	chatFile    = "chat.json"
+	chatLines   = 200
+	pageMark    = "[from the page] "
+)
 
 var errAnswerMenu = errors.New("answer the menu")
 
@@ -42,7 +48,6 @@ type menuShot struct {
 
 type pageShotMsg struct {
 	menus map[string]menuShot
-	chat  []web.ChatLine
 }
 
 type pageAnswer struct{ id, text string }
@@ -67,7 +72,7 @@ func (m *model) stopWeb() {
 		m.web.Close()
 		m.web = nil
 	}
-	m.pageAnswers = nil
+	m.pageAnswers, m.pageChats = nil, nil
 }
 
 func (m *model) webStopped(msg webStoppedMsg) {
@@ -83,7 +88,7 @@ func (m *model) pageTick() tea.Cmd {
 	if m.web == nil {
 		return nil
 	}
-	answers := m.deliverAnswers()
+	answers := tea.Batch(m.deliverAnswers(), m.deliverChats())
 	if m.shooting {
 		return answers
 	}
@@ -97,7 +102,7 @@ func (m *model) pageTick() tea.Cmd {
 		}
 	}
 	m.shooting = true
-	t, chatFile := m.ops.T, filepath.Join(m.home, "chat.json")
+	t := m.ops.T
 	return tea.Batch(answers, func() tea.Msg {
 		shots := map[string]menuShot{}
 		for id, pane := range panes {
@@ -105,11 +110,7 @@ func (m *model) pageTick() tea.Cmd {
 				shots[id] = menuShot{choices: typing.Choices(out), screen: screenTail(out)}
 			}
 		}
-		var chat []web.ChatLine
-		if data, err := os.ReadFile(chatFile); err == nil {
-			json.Unmarshal(data, &chat)
-		}
-		return pageShotMsg{menus: shots, chat: chat}
+		return pageShotMsg{menus: shots}
 	})
 }
 
@@ -120,7 +121,7 @@ func screenTail(out string) string {
 
 func (m *model) pageShot(msg pageShotMsg) {
 	m.shooting = false
-	m.menus, m.chat = msg.menus, msg.chat
+	m.menus = msg.menus
 	m.publishPage()
 }
 
@@ -205,7 +206,7 @@ func (m *model) pageAction(a web.Action) tea.Cmd {
 	case "done":
 		return m.pageDone(a)
 	case "chat":
-		return replyTo(a, errors.New("the chat is not ready yet"))
+		return m.pageChat(a)
 	}
 	return replyTo(a, fmt.Errorf("unknown action %s", a.Kind))
 }
@@ -399,4 +400,99 @@ func (m *model) pageDone(a web.Action) tea.Cmd {
 	m.publishPage()
 	replyTo(a, nil)
 	return tea.Batch(m.saveTasks(), m.taskSummary(t, now))
+}
+
+func (m *model) pageChat(a web.Action) tea.Cmd {
+	text := strings.TrimSpace(a.Text)
+	switch {
+	case text == "":
+		return replyTo(a, errors.New("the message is empty"))
+	case m.state.Assistant.Paused:
+		return replyTo(a, errors.New("the assistant is paused; resume it in deckhand"))
+	}
+	m.pageChats = append(m.pageChats, text)
+	replyTo(a, nil)
+	return tea.Batch(m.addChat("you", text), m.deliverChats())
+}
+
+func (m *model) deliverChats() tea.Cmd {
+	r, ok := m.rowByID(m.state.Assistant.ID)
+	if len(m.pageChats) == 0 || !ok || !m.typeReady(r) {
+		return nil
+	}
+	held := m.pageChats
+	m.pageChats = nil
+	lines := make([]string, len(held))
+	for i, text := range held {
+		lines[i] = pageMark + text
+	}
+	return m.typeIn(r, strings.Join(lines, "\n"), func(err error) tea.Cmd {
+		switch {
+		case errors.Is(err, typing.ErrMenu):
+			m.pageChats = append(held, m.pageChats...)
+		case err != nil:
+			m.err = typeError(r.Name, err)
+		}
+		return nil
+	})
+}
+
+func (m *model) chatRequest(req ctl.Request) tea.Cmd {
+	fail := func(text string) tea.Cmd { return m.answer(req.ID, ctl.Reply{Err: text}) }
+	switch {
+	case !m.isAssistant(req.Caller):
+		return fail("only the assistant can do this")
+	case req.Op != "chat-reply":
+		return fail("unknown request " + req.Op)
+	case strings.TrimSpace(req.Text) == "":
+		return fail("the reply is empty")
+	}
+	return tea.Batch(m.addChat("assistant", strings.TrimSpace(req.Text)), m.answer(req.ID, ctl.Reply{Out: "sent"}))
+}
+
+func (m *model) addChat(from, text string) tea.Cmd {
+	m.chat = append(m.chat, web.ChatLine{At: time.Now(), From: from, Text: text})
+	if over := len(m.chat) - chatLines; over > 0 {
+		m.chat = slices.Clone(m.chat[over:])
+	}
+	m.publishPage()
+	sv, home := m.chatSaver, m.home
+	sv.mu.Lock()
+	sv.lines = slices.Clone(m.chat)
+	sv.mu.Unlock()
+	return func() tea.Msg {
+		sv.mu.Lock()
+		defer sv.mu.Unlock()
+		if err := store.WriteJSON(home, chatFile, sv.lines); err != nil {
+			return errMsg{err}
+		}
+		return nil
+	}
+}
+
+func (m *model) notifyNeed(t tasks.Task) tea.Cmd {
+	if m.web != nil && m.web.Clients() > 0 {
+		return nil
+	}
+	need := t.Need
+	if need == "" {
+		need = "needs you"
+	}
+	name, args := notifyArgs(runtime.GOOS, t.Title, need)
+	return func() tea.Msg {
+		if _, err := exec.LookPath(name); err != nil {
+			return nil
+		}
+		if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {
+			return errMsg{fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(out)))}
+		}
+		return nil
+	}
+}
+
+func notifyArgs(goos, title, need string) (string, []string) {
+	if goos == "darwin" {
+		return "osascript", []string{"-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", "--", title, need}
+	}
+	return "notify-send", []string{"--", title, need}
 }

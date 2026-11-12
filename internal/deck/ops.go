@@ -89,10 +89,13 @@ func (o Ops) Start(l Launch) (string, error) {
 		args = append(args,
 			"--plugin-dir="+o.AssistantPluginDir,
 			"--append-system-prompt-file="+filepath.Join(o.AssistantDir, "instructions.md"),
-			"--allowedTools=Bash("+o.Exe+" session *),Bash("+o.Exe+" sub *)",
+			"--allowedTools="+o.allowed("session", "sub", "task", "project", "chat", "queue"),
 		)
 	} else {
 		args = append(args, "--plugin-dir="+o.PluginDir)
+		if o.Cfg.Assistant {
+			args = append(args, "--allowedTools="+o.allowed("task", "role", "queue"))
+		}
 		if system := strings.Join(slices.DeleteFunc([]string{o.Rules, l.System}, func(s string) bool { return s == "" }), "\n\n"); system != "" {
 			args = append(args, "--append-system-prompt="+system)
 		}
@@ -120,6 +123,14 @@ func (o Ops) Start(l Launch) (string, error) {
 		return paneID, err
 	}
 	return paneID, nil
+}
+
+func (o Ops) allowed(groups ...string) string {
+	rules := make([]string, len(groups))
+	for i, g := range groups {
+		rules[i] = "Bash(" + o.Exe + " " + g + " *)"
+	}
+	return strings.Join(rules, ",")
 }
 
 func (o Ops) StopJob(job, account string) error {

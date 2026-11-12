@@ -204,6 +204,11 @@ type taskSaver struct {
 	tasks []tasks.Task
 }
 
+type chatSaver struct {
+	mu    sync.Mutex
+	lines []web.ChatLine
+}
+
 type model struct {
 	ops        deck.Ops
 	reader     *transcript.Reader
@@ -315,7 +320,9 @@ type model struct {
 	shooting    bool
 	menus       map[string]menuShot
 	chat        []web.ChatLine
+	chatSaver   *chatSaver
 	pageAnswers []pageAnswer
+	pageChats   []string
 }
 
 func Run(version string) error {
@@ -336,6 +343,8 @@ func Run(version string) error {
 	if err != nil {
 		saved = map[string]store.PRState{}
 	}
+	var chat []web.ChatLine
+	chatErr := store.ReadJSON(filepath.Join(home, chatFile), &chat)
 	reader := transcript.NewReader(filepath.Join(home, "summaries.json"))
 	search := textinput.New()
 	search.Prompt = "/"
@@ -378,6 +387,9 @@ func Run(version string) error {
 		saver:       &stateSaver{},
 		tasks:       taskList,
 		taskSaver:   &taskSaver{},
+		chat:        chat,
+		chatSaver:   &chatSaver{},
+		err:         chatErr,
 		starts:      &pidStarts{at: map[paneProc]time.Time{}},
 		prs:         loadedPRs(saved),
 		prSem:       make(chan struct{}, prParallel),

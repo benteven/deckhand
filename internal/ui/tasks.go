@@ -100,6 +100,7 @@ func (m *model) taskRequest(req ctl.Request) tea.Cmd {
 		t := m.tasks[i]
 		out := "updated"
 		var told tea.Cmd
+		before := t.Status
 		if req.Op == "task-done" {
 			if t.Status == "done" {
 				return fail("task %s is done already", t.ID)
@@ -116,6 +117,9 @@ func (m *model) taskRequest(req ctl.Request) tea.Cmd {
 				return fail("%s", err)
 			}
 			t.Log(now, strings.Join(changes, ", "))
+			if before != "needs-you" && t.Status == "needs-you" && m.ops.Cfg.Assistant {
+				told = m.notifyNeed(t)
+			}
 		}
 		m.tasks[i] = t
 		return tea.Batch(m.saveTasks(), m.answer(req.ID, ctl.Reply{Out: out}), told)

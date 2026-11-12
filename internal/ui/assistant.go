@@ -225,6 +225,7 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 		return nil
 	}
 	now, changed := time.Now(), false
+	var told []tea.Cmd
 	for id, ev := range next {
 		before, known := prev[id]
 		if !known || m.isAssistant(id) || m.ending[id] {
@@ -258,9 +259,12 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 				t.Status, t.Need = "needs-you", text
 				t.Log(now, "needs you: "+text)
 				changed = true
+				if !m.userIn(r) {
+					told = append(told, m.notifyNeed(*t))
+				}
 			}
 		}
-		if m.slot == r.PaneID && !m.focused {
+		if m.userIn(r) {
 			continue
 		}
 		m.notes = append(m.notes, note)
@@ -269,9 +273,9 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 		m.notes = m.notes[over:]
 	}
 	if changed {
-		return tea.Batch(m.saveTasks(), m.deliverNotes())
+		told = append(told, m.saveTasks())
 	}
-	return m.deliverNotes()
+	return tea.Batch(append(told, m.deliverNotes())...)
 }
 
 func (m *model) assistantFree(r deck.Row) bool {
