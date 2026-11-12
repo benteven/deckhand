@@ -1,0 +1,177 @@
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/benteven/deckhand/internal/ctl"
+	"github.com/benteven/deckhand/internal/paths"
+)
+
+var errUsage = errors.New("usage")
+
+func runCtl(group string, args []string) {
+	req, err := parseCtl(group, args)
+	if err != nil {
+		if !errors.Is(err, errUsage) {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		fmt.Fprint(os.Stderr, ctlUsage(group))
+		os.Exit(2)
+	}
+	req.Caller = os.Getenv(ctl.SessionEnv)
+	if req.Caller == "" {
+		fmt.Fprintln(os.Stderr, "run this from a deckhand session")
+		os.Exit(2)
+	}
+	req.ID = randomID()
+	rep, err := ctl.Send(paths.DeckHome(), req, ctl.RequestTimeout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if rep.Err != "" {
+		fmt.Fprintln(os.Stderr, rep.Err)
+		os.Exit(1)
+	}
+	if rep.Out != "" {
+		fmt.Println(strings.TrimRight(rep.Out, "\n"))
+	}
+}
+
+func randomID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return hex.EncodeToString(b)
+}
+
+func ctlUsage(group string) string {
+	if group == "sub" {
+		return "usage:\n  deckhand sub start --name NAME --parent ADDR -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
+	}
+	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] -- PROMPT\n  deckhand session resume ID\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
+}
+
+func splitDash(args []string) ([]string, []string, bool) {
+	for i, a := range args {
+		if a == "--" {
+			return args[:i], args[i+1:], true
+		}
+	}
+	return args, nil, false
+}
+
+func parseFlags(args []string, allowed ...string) (map[string]string, error) {
+	out := map[string]string{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name := strings.TrimPrefix(a, "--")
+		ok := false
+		for _, k := range allowed {
+			if k == name {
+				ok = true
+			}
+		}
+		if !strings.HasPrefix(a, "--") || !ok {
+			return nil, fmt.Errorf("unexpected argument %q", a)
+		}
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("--%s needs a value", name)
+		}
+		i++
+		out[name] = args[i]
+	}
+	return out, nil
+}
+
+func parseCtl(group string, args []string) (ctl.Request, error) {
+	if len(args) == 0 {
+		return ctl.Request{}, errUsage
+	}
+	verb, rest := args[0], args[1:]
+	if group == "sub" {
+		return parseSub(verb, rest)
+	}
+	return parseSession(verb, rest)
+}
+
+func parseSession(verb string, rest []string) (ctl.Request, error) {
+	switch verb {
+	case "list":
+		if len(rest) != 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "list"}, nil
+	case "search":
+		if len(rest) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "search", Text: strings.Join(rest, " ")}, nil
+	case "resume", "handoff", "close":
+		if len(rest) != 1 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: verb, Target: rest[0]}, nil
+	case "send":
+		head, tail, ok := splitDash(rest)
+		if !ok || len(head) != 1 || len(tail) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "send", Target: head[0], Text: strings.Join(tail, " ")}, nil
+	case "start":
+		head, tail, ok := splitDash(rest)
+		if !ok || len(tail) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		f, err := parseFlags(head, "folder", "name", "account")
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		if f["folder"] == "" || f["name"] == "" {
+			return ctl.Request{}, errUsage
+		}
+		folder, err := filepath.Abs(f["folder"])
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " ")}, nil
+	}
+	return ctl.Request{}, errUsage
+}
+
+func parseSub(verb string, rest []string) (ctl.Request, error) {
+	switch verb {
+	case "list":
+		if len(rest) != 0 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "sub-list"}, nil
+	case "close":
+		if len(rest) != 1 {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "sub-close", Name: rest[0]}, nil
+	case "start":
+		head, tail, ok := splitDash(rest)
+		if !ok || len(tail) == 0 {
+			return ctl.Request{}, errUsage
+		}
+		f, err := parseFlags(head, "name", "parent")
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		if f["name"] == "" || f["parent"] == "" {
+			return ctl.Request{}, errUsage
+		}
+		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Text: strings.Join(tail, " ")}, nil
+	}
+	return ctl.Request{}, errUsage
+}

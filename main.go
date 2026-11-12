@@ -61,6 +61,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "session":
+		runCtl("session", os.Args[2:])
+	case "sub":
+		runCtl("sub", os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "ui":
