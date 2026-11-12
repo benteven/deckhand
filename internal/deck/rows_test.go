@@ -59,3 +59,35 @@ func TestFilter(t *testing.T) {
 	assert.Equal(t, []string{"2"}, ids(Filter(rows, "ledger shop")))
 	assert.Equal(t, []string{"1"}, ids(Filter(rows, "#4598")))
 }
+
+func TestAssistantAndSubsessionRows(t *testing.T) {
+	t0 := time.Now()
+	at := func(h int) time.Time { return t0.Add(-time.Duration(h) * time.Hour) }
+	in := Inputs{
+		State: store.State{
+			Assistant: store.Assistant{ID: "a"},
+			Subs: []store.Subsession{
+				{ID: "c2", Parent: "p"},
+				{ID: "c1", Parent: "p"},
+				{ID: "o", Parent: "gone"},
+			},
+			Names: map[string]string{"gone": "old parent"},
+			Active: []store.ActiveEntry{
+				{SessionID: "a", LastInteraction: at(5)},
+				{SessionID: "p", LastInteraction: at(2)},
+				{SessionID: "x", LastInteraction: at(1)},
+				{SessionID: "c1", LastInteraction: at(0)},
+				{SessionID: "c2", LastInteraction: at(4)},
+				{SessionID: "o", LastInteraction: at(3)},
+			},
+		},
+		Panes: map[string]string{"a": "%1", "p": "%2", "x": "%3", "c1": "%4", "c2": "%5", "o": "%6"},
+	}
+	active, _ := Build(in)
+	assert.Equal(t, []string{"a", "x", "p", "c2", "c1", "o"}, ids(active))
+	assert.True(t, active[0].Assistant)
+	assert.Equal(t, "p", active[3].Parent)
+	assert.Equal(t, "old parent", active[5].Orphan)
+	assert.Equal(t, []string{"p", "c2", "c1"}, ids(Family(active, "c1")))
+	assert.Empty(t, Family(active, "x"))
+}

@@ -15,6 +15,7 @@ type Config struct {
 	Prefix     string   `json:"prefix"`
 	ClaudeArgs []string `json:"claude_args"`
 	ListWidth  int      `json:"list_width"`
+	Assistant  bool     `json:"assistant"`
 }
 
 const (
@@ -78,6 +79,21 @@ type ActiveEntry struct {
 	Num             int       `json:"num"`
 }
 
+type Assistant struct {
+	ID        string `json:"id"`
+	Paused    bool   `json:"paused"`
+	UpdatedOn string `json:"updated_on"`
+}
+
+type Subsession struct {
+	ID     string `json:"id"`
+	Parent string `json:"parent"`
+	Name   string `json:"name"`
+	Dir    string `json:"dir"`
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+}
+
 type State struct {
 	Names     map[string]string    `json:"names"`
 	Active    []ActiveEntry        `json:"active"`
@@ -85,6 +101,18 @@ type State struct {
 	Accounts  map[string]string    `json:"accounts,omitempty"`
 	Limits    map[string]time.Time `json:"limits,omitempty"`
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
+	Assistant Assistant            `json:"assistant"`
+	Subs      []Subsession         `json:"subs,omitempty"`
+	Cleanups  []string             `json:"cleanups,omitempty"`
+}
+
+func (s State) SubOf(id string) (Subsession, bool) {
+	for _, sub := range s.Subs {
+		if sub.ID == id {
+			return sub, true
+		}
+	}
+	return Subsession{}, false
 }
 
 func (s State) AccountFor(sessionID string) string {
