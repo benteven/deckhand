@@ -1588,7 +1588,11 @@ func (m *model) resume(r deck.Row) tea.Cmd {
 	ops, account := m.ops, m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
 	name, home := m.state.Names[r.SessionID], m.home
 	sub, isSub := m.state.SubOf(r.SessionID)
+	queued := slices.Contains(m.state.Cleanups, r.SessionID)
 	return func() tea.Msg {
+		if isSub && queued {
+			return startedMsg{id: r.SessionID, err: fmt.Errorf("answer the worktree question for %s first", sub.Name)}
+		}
 		if _, err := os.Stat(sub.Dir); isSub && err != nil {
 			return startedMsg{id: r.SessionID, err: fmt.Errorf("the worktree %s was removed", sub.Dir)}
 		}

@@ -542,7 +542,12 @@ func (m *model) moveSession(from, to string) {
 	}
 }
 
-type cleanupDialog struct{ sub store.Subsession }
+const cleanupGuard = time.Second
+
+type cleanupDialog struct {
+	sub    store.Subsession
+	opened time.Time
+}
 
 func (d *cleanupDialog) view(w, h int) string {
 	body := []string{
@@ -554,14 +559,16 @@ func (d *cleanupDialog) view(w, h int) string {
 
 func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
-	if key != "y" && key != "n" && key != "esc" {
+	if time.Since(m.cleanup.opened) < cleanupGuard || (key != "y" && key != "n" && key != "esc") {
 		return nil
 	}
 	sub := m.cleanup.sub
 	m.cleanup = nil
 	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
 	cmds := []tea.Cmd{m.saveState()}
-	if key == "y" {
+	if r, ok := m.rowByID(sub.ID); key == "y" && (m.resuming[sub.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
+		m.err = fmt.Errorf("%s is running; the worktree stays", sub.Name)
+	} else if key == "y" {
 		cmds = append(cmds, func() tea.Msg {
 			if err := ctl.Remove(sub.Repo, sub.Name, deck.Trash); err != nil {
 				return errMsg{err}
