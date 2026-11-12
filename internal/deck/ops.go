@@ -126,9 +126,9 @@ func (o Ops) Start(l Launch) (string, error) {
 }
 
 func (o Ops) allowed(groups ...string) string {
-	rules := make([]string, len(groups))
-	for i, g := range groups {
-		rules[i] = "Bash(" + o.Exe + " " + g + " *)"
+	var rules []string
+	for _, g := range groups {
+		rules = append(rules, "Bash("+o.Exe+" "+g+" *)", "Bash(deckhand "+g+" *)")
 	}
 	return strings.Join(rules, ",")
 }
