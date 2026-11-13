@@ -114,7 +114,9 @@ Each account is a config folder in `~/.config/deckhand/accounts/<name>`, used as
 
 Each account has its own color for session names; `A` shows which color is which, and the default account stays white. `t` moves a session to the next account, and `n` starts on the account of the session under the cursor (`ctrl-a` in the folder list changes it). A switch restarts the session in place. Sessions that are busy or have an open question switch when they are idle. Sessions running elsewhere are not switched.
 
-When a session hits a usage limit, the deck moves it to an account without a limit and sends "continue". The account for new sessions comes first, then the others in order. New sessions and resumes also skip a limited account. After the reset, moved sessions go back to their own account when they are idle and not on screen. The row shows "● limit" with the reset time while no account is free, and `A` shows which accounts are limited.
+When a session hits a usage limit, the deck moves it to an account without a limit and sends "continue". It picks the account with the lowest 5-hour use, then the lowest weekly use, and skips an account at 95% or more of its 5-hour window. New sessions and resumes also skip a limited account. After the reset, moved sessions go back to their own account when they are idle and not on screen. The row shows "● limit" with the reset time while no account is free, and `A` shows which accounts are limited.
+
+The bottom of the list shows each account's use, in the account's color: `work  5h 23%  week 41%`, or `work  limit until 14:00`. The numbers come from Claude Code's status line and are there for Pro and Max plans after a session on that account gets its first answer. Until then the line says "no data yet".
 
 ### Subsessions
 
@@ -167,7 +169,7 @@ A shortcut for the chat on macOS: run `deckhand page` once, so the browser has t
 
 deckhand runs its own tmux server (socket `deckhand`), so your own tmux setup is not touched. The list is a Bubble Tea program in the left pane. Each Claude Code session is a real process in its own tmux pane, swapped into the right side when you select it.
 
-Session data comes from Claude Code's own files in `~/.claude`, read only. There are two exceptions: `d` moves a transcript to the Trash, and a task start copies its project's transcript to the task's worktree entry in `~/.claude/projects`, so the task can fork from it. Sessions started by the app get hooks through `claude --settings`, which mark when a session waits for you; your global Claude Code settings are not changed.
+Session data comes from Claude Code's own files in `~/.claude`, read only. There are two exceptions: `d` moves a transcript to the Trash, and a task start copies its project's transcript to the task's worktree entry in `~/.claude/projects`, so the task can fork from it. Sessions started by the app get hooks through `claude --settings`, which mark when a session waits for you, and a status line, `deckhand statusline`, which saves the account's use to `~/.config/deckhand/usage` and then runs your own status line command, if you have one; your global Claude Code settings are not changed.
 
 App state lives in `~/.config/deckhand`. Set `"prefix"` in `config.json` to use another key than `ctrl-b`, `"claude_args"` to pass extra flags to every session, and `"list_width"` (24 to 100, default 36) for the list width. Drag the border or press `ctrl-b <` and `ctrl-b >` to change it and keep the new width.
 
