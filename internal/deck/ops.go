@@ -18,6 +18,7 @@ import (
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
+	"github.com/benteven/deckhand/internal/usage"
 )
 
 type Ops struct {
@@ -50,7 +51,7 @@ func (o Ops) Start(l Launch) (string, error) {
 		return "", fmt.Errorf("folder not found: %s", cwd)
 	}
 	args := []string{paths.ClaudeCommand()}
-	envArgs := []string{"env", ctl.SessionEnv + "=" + sessionID}
+	envArgs := []string{"env", ctl.SessionEnv + "=" + sessionID, usage.Env + "=" + accounts.Label(account)}
 	configDir := paths.ClaudeHome()
 	if account != "" {
 		if !accounts.LoggedIn(o.Home, account) {

@@ -25,6 +25,7 @@ import (
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
+	"github.com/benteven/deckhand/internal/usage"
 	"github.com/benteven/deckhand/internal/web"
 )
 
@@ -58,6 +59,8 @@ func main() {
 		}
 	case "hook":
 		runHook()
+	case "statusline":
+		runStatusLine()
 	case "reload":
 		if err := reload(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -176,6 +179,16 @@ func runHook() {
 	}
 }
 
+func runStatusLine() {
+	config := os.Getenv("CLAUDE_CONFIG_DIR")
+	if config == "" {
+		config = paths.ClaudeHome()
+	}
+	if err := usage.StatusLine(filepath.Join(paths.DeckHome(), "usage"), os.Getenv(usage.Env), filepath.Join(config, "settings.json"), os.Stdin, os.Stdout, time.Now()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+}
+
 func login(args []string) error {
 	wait := len(args) > 0 && args[0] == "--wait"
 	if wait {
@@ -239,7 +252,7 @@ func setup() (tmux.Client, store.Config, string, error) {
 	if err := tmux.WriteConf(conf, cfg); err != nil {
 		return tmux.Client{}, cfg, "", err
 	}
-	if err := os.WriteFile(filepath.Join(home, "hooks.json"), events.HookSettings(exe), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "hooks.json"), events.HookSettings(exe, usage.Setting(tmux.ShellQuote(exe)+" statusline", filepath.Join(paths.ClaudeHome(), "settings.json"))), 0o644); err != nil {
 		return tmux.Client{}, cfg, "", err
 	}
 	if err := ctl.WritePlugins(home, exe); err != nil {
