@@ -16,15 +16,15 @@ func TestCopyTranscript(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(from), 0o755))
 	require.NoError(t, os.WriteFile(from, []byte("parent\n"), 0o644))
 
-	require.NoError(t, CopyTranscript(dir, "/a/b", "/a/b/.claude/worktrees/x", id))
+	require.NoError(t, CopyTranscript(dir, dir, "/a/b", "/a/b/.claude/worktrees/x", id))
 	to := filepath.Join(dir, "projects", "-a-b--claude-worktrees-x", id+".jsonl")
 	got, err := os.ReadFile(to)
 	require.NoError(t, err)
 	assert.Equal(t, "parent\n", string(got))
 
 	require.NoError(t, os.WriteFile(to, []byte("fork\n"), 0o644))
-	require.NoError(t, CopyTranscript(dir, "/a/b", "/a/b/.claude/worktrees/x", id))
+	require.NoError(t, CopyTranscript(dir, dir, "/a/b", "/a/b/.claude/worktrees/x", id))
 	got, err = os.ReadFile(to)
 	require.NoError(t, err)
-	assert.Equal(t, "fork\n", string(got))
+	assert.Equal(t, "parent\n", string(got))
 }

@@ -392,7 +392,7 @@ func (m *model) taskCreated(msg taskCreatedMsg) tea.Cmd {
 	t := &m.tasks[i]
 	t.Repo, t.Branch, t.Dir, t.Status, t.Need = msg.repo, msg.branch, msg.dir, "working", ""
 	t.Log(time.Now(), fmt.Sprintf("started on %s with %s", msg.branch, msg.model))
-	launch := deck.Launch{Cwd: msg.dir, SessionID: msg.id, Name: msg.name, Account: m.state.AccountFor(project), Prompt: taskPrompt(*t), ForkOf: project, ForkCwd: msg.cwd}
+	launch := deck.Launch{Cwd: msg.dir, SessionID: msg.id, Name: msg.name, Account: m.state.AccountFor(project), Prompt: taskPrompt(*t), ForkOf: project, ForkCwd: msg.cwd, ForkAccount: m.state.AccountFor(project)}
 	out := fmt.Sprintf("started task %s as %s in %s on branch %s", t.ID, msg.name, msg.dir, msg.branch)
 	start := forRequest(m.launch(launch), req.ID, out)
 	return tea.Batch(m.saveState(), m.saveTasks(), func() tea.Msg {
@@ -577,7 +577,7 @@ func (m *model) roleFound(msg roleFoundMsg) tea.Cmd {
 		m.state.Models[id] = msg.role.Model
 	}
 	prompt := fmt.Sprintf("deckhand started you as the %s of task %s: %s. You work in %s on branch %s.", req.Name, t.ID, t.Title, t.Dir, t.Branch)
-	launch := deck.Launch{Cwd: t.Dir, SessionID: id, Name: name, Account: m.state.AccountFor(t.Session), Prompt: prompt, ForkOf: t.Session, ForkCwd: t.Dir}
+	launch := deck.Launch{Cwd: t.Dir, SessionID: id, Name: name, Account: m.state.AccountFor(t.Session), Prompt: prompt, ForkOf: t.Session, ForkCwd: t.Dir, ForkAccount: m.state.AccountFor(t.Session)}
 	out := fmt.Sprintf("started %s for task %s as %s in %s", req.Name, t.ID, name, t.Dir)
 	return tea.Batch(m.saveState(), forRequest(m.launch(launch), req.ID, out))
 }

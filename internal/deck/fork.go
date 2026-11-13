@@ -1,7 +1,6 @@
 package deck
 
 import (
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,35 +16,33 @@ func projectDir(cwd string) string {
 	return string(b)
 }
 
-func CopyTranscript(configDir, fromCwd, toCwd, id string) error {
-	dir := filepath.Join(configDir, "projects", projectDir(toCwd))
+func CopyTranscript(fromDir, toDir, fromCwd, toCwd, id string) error {
+	dir := filepath.Join(toDir, "projects", projectDir(toCwd))
 	to := filepath.Join(dir, id+".jsonl")
-	if _, err := os.Lstat(to); err == nil {
-		return nil
-	}
-	src, err := os.Open(filepath.Join(configDir, "projects", projectDir(fromCwd), id+".jsonl"))
+	src, err := os.Open(filepath.Join(fromDir, "projects", projectDir(fromCwd), id+".jsonl"))
 	if err != nil {
 		return err
 	}
 	defer src.Close()
+	if a, err := src.Stat(); err == nil {
+		if b, err := os.Stat(to); err == nil && os.SameFile(a, b) {
+			return nil
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	dst, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return nil
-	}
+	tmp, err := os.CreateTemp(dir, "."+id+"-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		os.Remove(to)
+	defer os.Remove(tmp.Name())
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
 		return err
 	}
-	if err := dst.Close(); err != nil {
-		os.Remove(to)
+	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return nil
+	return os.Rename(tmp.Name(), to)
 }

@@ -39,6 +39,7 @@ type Launch struct {
 	Resume                                bool
 	ForkOf                                string
 	ForkCwd                               string
+	ForkAccount                           string
 	Model                                 string
 	System                                string
 }
@@ -65,7 +66,11 @@ func (o Ops) Start(l Launch) (string, error) {
 	args = append(envArgs, args...)
 	switch {
 	case l.ForkOf != "":
-		if err := CopyTranscript(configDir, l.ForkCwd, cwd, l.ForkOf); err != nil {
+		from := paths.ClaudeHome()
+		if l.ForkAccount != "" {
+			from = accounts.Dir(o.Home, l.ForkAccount)
+		}
+		if err := CopyTranscript(from, configDir, l.ForkCwd, cwd, l.ForkOf); err != nil {
 			return "", err
 		}
 		args = append(args, "--resume", l.ForkOf, "--fork-session", "--session-id", sessionID)
