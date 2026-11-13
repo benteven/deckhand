@@ -708,6 +708,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			order = append(order, s.SessionID)
 		}
 		m.rename = newRenameDialog(r, msg.String() == "s", order)
+		if m.rename.suspend {
+			m.rename.subs = m.liveSubs(r.SessionID)
+		}
 		return m.rename.input.Focus()
 	case "t":
 		r, ok := m.current()
@@ -973,7 +976,22 @@ func (m *model) confirmRename(d *renameDialog) tea.Cmd {
 	if i < 0 || m.shown()[i].Kind != deck.Live || m.shown()[i].PaneID != d.pane {
 		return m.saveState()
 	}
-	return m.suspend(m.shown()[i], "")
+	subs := m.liveSubs(d.id)
+	cmds := []tea.Cmd{m.suspend(m.shown()[i], "")}
+	for _, r := range subs {
+		cmds = append(cmds, m.suspend(r, ""))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) liveSubs(id string) []deck.Row {
+	var out []deck.Row
+	for _, r := range m.active {
+		if r.Parent == id && r.Kind == deck.Live {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (m *model) detach(r deck.Row) (store.ActiveEntry, tea.Cmd) {
