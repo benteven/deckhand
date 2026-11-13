@@ -310,6 +310,7 @@ type model struct {
 	stoppedAt     map[string]time.Time
 	reprompt      time.Time
 	typing        map[string]bool
+	replies       map[string]replyCache
 	asking        map[string]bool
 	projectNotes  map[string][]string
 	closing       map[string]bool
