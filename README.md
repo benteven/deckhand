@@ -160,13 +160,13 @@ Models: the assistant runs on Sonnet, projects and tasks on Opus, and the tester
 
 The queue: roles that share ports, a local stack or a database take turns. A role runs `deckhand queue take` before it starts the running system and `deckhand queue give` when it stops it. The queue is per repo; a role file can name another one with `queue:`. `deckhand queue list` shows who has the turn and who waits, and the assistant tells you when a turn is stuck.
 
-A key for the chat on macOS: run `deckhand page` once, so the browser has the page's key. Then open Shortcuts, make a new shortcut with the action "Open URLs" and the URL `http://127.0.0.1:7317/#new`, and in its details add the keyboard shortcut `⌃⌥⌘A`.
+A shortcut for the chat on macOS: run `deckhand page` once, so the browser has the page's token. Then open Shortcuts, make a new shortcut with the action "Open URLs" and the URL `http://127.0.0.1:7317/#new`, and in its details add the keyboard shortcut `⌃⌥⌘A`.
 
 ## How it works
 
 deckhand runs its own tmux server (socket `deckhand`), so your own tmux setup is not touched. The list is a Bubble Tea program in the left pane. Each Claude Code session is a real process in its own tmux pane, swapped into the right side when you select it.
 
-Session data comes from Claude Code's own files in `~/.claude`, read only. The one exception is `d`, which moves a transcript to the Trash. Sessions started by the app get hooks through `claude --settings`, which mark when a session waits for you; your global Claude Code settings are not changed.
+Session data comes from Claude Code's own files in `~/.claude`, read only. There are two exceptions: `d` moves a transcript to the Trash, and a task start copies its project's transcript to the task's worktree entry in `~/.claude/projects`, so the task can fork from it. Sessions started by the app get hooks through `claude --settings`, which mark when a session waits for you; your global Claude Code settings are not changed.
 
 App state lives in `~/.config/deckhand`. Set `"prefix"` in `config.json` to use another key than `ctrl-b`, `"claude_args"` to pass extra flags to every session, and `"list_width"` (24 to 100, default 36) for the list width. Drag the border or press `ctrl-b <` and `ctrl-b >` to change it and keep the new width.
 
