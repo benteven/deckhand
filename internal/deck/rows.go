@@ -2,6 +2,7 @@ package deck
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -139,94 +140,104 @@ func Build(in Inputs) (active, suspended []Row) {
 	})
 	if id := in.State.Assistant.ID; in.State.Assistant.Paused && id != "" && !seen[id] {
 		for _, f := range in.Files {
-			if f.SessionID != id {
-				continue
+			if f.SessionID == id {
+				seen[id] = true
+				active = append(active, fileRow(in, f))
 			}
-			seen[id] = true
-			sum := in.Summaries[id]
-			last := sum.LastUsed
-			if last.IsZero() {
-				last = f.ModTime
-			}
-			active = append(active, Row{
-				SessionID:       id,
-				Name:            name(in.State, "", live.Session{}, id, sum),
-				Cwd:             sum.Cwd,
-				TranscriptPath:  f.Path,
-				Kind:            Suspended,
-				Summary:         sum,
-				LastInteraction: last,
-			})
 		}
 	}
-	active = arrange(in.State, active)
+	active = arrange(in.State, withParents(in, active, seen))
 
 	for _, f := range in.Files {
-		if seen[f.SessionID] {
-			continue
+		if !seen[f.SessionID] {
+			suspended = append(suspended, fileRow(in, f))
 		}
-		sum := in.Summaries[f.SessionID]
-		last := sum.LastUsed
-		if last.IsZero() {
-			last = f.ModTime
-		}
-		suspended = append(suspended, Row{
-			SessionID:       f.SessionID,
-			Name:            name(in.State, "", live.Session{}, f.SessionID, sum),
-			Cwd:             sum.Cwd,
-			TranscriptPath:  f.Path,
-			Kind:            Suspended,
-			Summary:         sum,
-			LastInteraction: last,
-		})
 	}
 	sort.SliceStable(suspended, func(i, j int) bool {
 		return suspended[i].LastInteraction.After(suspended[j].LastInteraction)
 	})
-	return active, suspended
+	return active, nest(in.State, suspended)
+}
+
+func fileRow(in Inputs, f transcript.File) Row {
+	sum := in.Summaries[f.SessionID]
+	last := sum.LastUsed
+	if last.IsZero() {
+		last = f.ModTime
+	}
+	return Row{
+		SessionID:       f.SessionID,
+		Name:            name(in.State, "", live.Session{}, f.SessionID, sum),
+		Cwd:             sum.Cwd,
+		TranscriptPath:  f.Path,
+		Kind:            Suspended,
+		Summary:         sum,
+		LastInteraction: last,
+	}
+}
+
+func withParents(in Inputs, rows []Row, seen map[string]bool) []Row {
+	files := make(map[string]transcript.File, len(in.Files))
+	for _, f := range in.Files {
+		files[f.SessionID] = f
+	}
+	placed := map[string]bool{}
+	out := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		sub, ok := in.State.SubOf(r.SessionID)
+		if f, has := files[sub.Parent]; ok && has && !seen[sub.Parent] && !placed[sub.Parent] {
+			placed[sub.Parent] = true
+			out = append(out, fileRow(in, f))
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 func arrange(state store.State, rows []Row) []Row {
-	isActive := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		isActive[r.SessionID] = true
+	out := nest(state, rows)
+	for i, r := range out {
+		if sub, ok := state.SubOf(r.SessionID); ok && r.Parent == "" {
+			out[i].Orphan = name(state, "", live.Session{}, sub.Parent, transcript.Summary{})
+		}
 	}
-	children := map[string][]int{}
-	child := map[string]bool{}
+	id := state.Assistant.ID
+	i := slices.IndexFunc(out, func(r Row) bool { return r.SessionID == id && r.Parent == "" })
+	if id == "" || i < 0 {
+		return out
+	}
+	out[i].Assistant, out[i].Paused = true, state.Assistant.Paused
+	j := i + 1
+	for j < len(out) && out[j].Parent == id {
+		j++
+	}
+	return slices.Concat(out[i:j], out[:i], out[j:])
+}
+
+func nest(state store.State, rows []Row) []Row {
 	byID := make(map[string]int, len(rows))
 	for i, r := range rows {
 		byID[r.SessionID] = i
 	}
+	children := map[string][]int{}
+	child := map[string]bool{}
 	for _, sub := range state.Subs {
 		i, ok := byID[sub.ID]
-		if !ok {
-			continue
-		}
-		if isActive[sub.Parent] && sub.Parent != sub.ID {
+		if _, has := byID[sub.Parent]; ok && has && sub.Parent != sub.ID {
 			rows[i].Parent = sub.Parent
 			children[sub.Parent] = append(children[sub.Parent], i)
 			child[sub.ID] = true
-		} else {
-			rows[i].Orphan = name(state, "", live.Session{}, sub.Parent, transcript.Summary{})
 		}
 	}
 	out := make([]Row, 0, len(rows))
-	emit := func(i int) {
-		out = append(out, rows[i])
-		for _, c := range children[rows[i].SessionID] {
-			out = append(out, rows[c])
-		}
-	}
-	if i, ok := byID[state.Assistant.ID]; ok && state.Assistant.ID != "" && !child[state.Assistant.ID] {
-		rows[i].Assistant = true
-		rows[i].Paused = state.Assistant.Paused
-		emit(i)
-	}
-	for i, r := range rows {
-		if child[r.SessionID] || rows[i].Assistant {
+	for _, r := range rows {
+		if child[r.SessionID] {
 			continue
 		}
-		emit(i)
+		out = append(out, r)
+		for _, c := range children[r.SessionID] {
+			out = append(out, rows[c])
+		}
 	}
 	return out
 }

@@ -119,7 +119,7 @@ When a session hits a usage limit, the deck moves it to an account without a lim
 
 A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
 
-In the list, subsessions sit under their parent, indented with `↳`. A subsession whose parent is not running shows "sub of" and the parent's name. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
+In the list, subsessions sit under their parent, indented with `↳`. When the parent is suspended, it shows in gray at its place with "suspended", and Enter resumes it. A subsession whose parent is gone shows "sub of" and the parent's name. In Suspended, a suspended subsession sits under its suspended parent. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
 
 When a subsession closes, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
 

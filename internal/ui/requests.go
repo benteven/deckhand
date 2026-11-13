@@ -208,7 +208,12 @@ func (m *model) replyTyped(id, name, out string) func(error) tea.Cmd {
 
 func (m *model) listOut() string {
 	var lines []string
+	listed := map[string]bool{}
 	for _, r := range slices.Concat(m.active, m.suspended) {
+		if listed[r.SessionID] {
+			continue
+		}
+		listed[r.SessionID] = true
 		data, err := json.Marshal(m.listLineOf(r))
 		if err == nil {
 			lines = append(lines, string(data))
