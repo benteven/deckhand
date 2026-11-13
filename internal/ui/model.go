@@ -400,6 +400,14 @@ func Run(version string) error {
 		noGH:        !hasGH(),
 		version:     version,
 	}
+	for name, q := range state.Queues {
+		if len(q) > 0 {
+			if m.turns == nil {
+				m.turns = map[string]string{}
+			}
+			m.turns[q[0]] = name
+		}
+	}
 	p := tea.NewProgram(m)
 	m.send = p.Send
 	_, err = p.Run()
