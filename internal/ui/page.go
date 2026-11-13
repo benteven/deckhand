@@ -332,7 +332,7 @@ func (m *model) pageChoice(a web.Action) tea.Cmd {
 		m.typing = map[string]bool{}
 	}
 	m.typing[r.PaneID] = true
-	t, pane, n := m.ops.T, r.PaneID, a.Choice
+	t, pane, n, label := m.ops.T, r.PaneID, a.Choice, a.Label
 	done := func(err error) tea.Msg {
 		return typedMsg{pane: pane, err: err, then: func(err error) tea.Cmd { return replyTo(a, err) }}
 	}
@@ -341,8 +341,12 @@ func (m *model) pageChoice(a web.Action) tea.Cmd {
 		if err != nil {
 			return done(err)
 		}
-		if len(typing.Choices(out)) < n {
+		choices := typing.Choices(out)
+		if len(choices) < n {
 			return done(errors.New("the session shows no such choice"))
+		}
+		if choices[n-1] != label {
+			return done(errors.New("the menu changed; look again"))
 		}
 		_, err = t.Run("send-keys", "-t", pane, strconv.Itoa(n))
 		return done(err)
