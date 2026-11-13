@@ -178,22 +178,42 @@ func Load(dir string) (State, error) {
 	if s.Names == nil {
 		s.Names = map[string]string{}
 	}
-	for i := range s.Active {
-		if s.Active[i].Num == 0 {
-			s.Active[i].Num = Claim(s.Active, 0)
-		}
-	}
+	s.Number()
 	return s, nil
 }
 
-func Claim(active []ActiveEntry, want int) int {
-	taken := func(n int) bool {
-		return slices.ContainsFunc(active, func(e ActiveEntry) bool { return e.Num == n })
+func (s *State) Number() {
+	for i := range s.Active {
+		e := &s.Active[i]
+		switch {
+		case s.Assistant.ID != "" && e.SessionID == s.Assistant.ID:
+			e.Num = 1
+		case e.Num == 1 && s.Assistant.ID != "":
+			e.Num = 0
+		}
 	}
-	if want > 0 && !taken(want) {
+	for i := range s.Active {
+		if s.Active[i].Num == 0 {
+			s.Active[i].Num = s.Claim(s.Active[i].SessionID, 0)
+		}
+	}
+}
+
+func (s State) Claim(id string, want int) int {
+	low := 1
+	if s.Assistant.ID != "" {
+		if id == s.Assistant.ID {
+			return 1
+		}
+		low = 2
+	}
+	taken := func(n int) bool {
+		return slices.ContainsFunc(s.Active, func(e ActiveEntry) bool { return e.Num == n && e.SessionID != id })
+	}
+	if want >= low && !taken(want) {
 		return want
 	}
-	for n := 1; n <= 9; n++ {
+	for n := low; n <= 9; n++ {
 		if !taken(n) {
 			return n
 		}

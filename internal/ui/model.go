@@ -1010,7 +1010,7 @@ func (m *model) detach(r deck.Row) (store.ActiveEntry, tea.Cmd) {
 func (m *model) restoreActive(entry store.ActiveEntry) {
 	delete(m.ending, entry.SessionID)
 	if !slices.ContainsFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == entry.SessionID }) {
-		entry.Num = store.Claim(m.state.Active, entry.Num)
+		entry.Num = m.state.Claim(entry.SessionID, entry.Num)
 		m.state.Active = append(m.state.Active, entry)
 	}
 }
@@ -1247,8 +1247,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		entry.Num = m.state.Active[i].Num
 		m.state.Active = slices.Delete(m.state.Active, i, i+1)
 	}
-	entry.Num = store.Claim(m.state.Active, entry.Num)
+	entry.Num = m.state.Claim(entry.SessionID, entry.Num)
 	m.state.Active = append(m.state.Active, entry)
+	m.state.Number()
 	if m.in.Panes == nil {
 		m.in.Panes = map[string]string{}
 	}
