@@ -1173,8 +1173,9 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		if msg.req != "" {
 			reply := m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
 			if i, ok := m.taskOf(msg.id); ok && msg.taskStart {
+				failed := m.taskStartFailed(i, msg.id)
 				m.rebuild()
-				return tea.Batch(m.taskStartFailed(i, msg.id), reply)
+				return tea.Batch(failed, reply)
 			}
 			return reply
 		}
