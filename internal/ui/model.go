@@ -1442,7 +1442,7 @@ func (m *model) followClear(msg refreshMsg) tea.Cmd {
 			}
 		}
 		entry.SessionID, entry.Name = next.SessionID, ""
-		m.remapSubs(old, next.SessionID)
+		m.remapSessionRefs(old, next.SessionID)
 		if m.isAssistant(old) {
 			m.setAssistantID(next.SessionID)
 			m.reprompt = time.Now()

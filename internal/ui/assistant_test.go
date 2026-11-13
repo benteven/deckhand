@@ -23,8 +23,8 @@ func TestRemapFollowsTasks(t *testing.T) {
 		state: store.State{Projects: []string{"p1"}, Models: map[string]string{"s1": "opus"}},
 		tasks: []tasks.Task{{ID: "t1", Project: "p1", Session: "s1"}},
 	}
-	m.remapSubs("s1", "s2")
-	m.remapSubs("p1", "p2")
+	m.remapSessionRefs("s1", "s2")
+	m.remapSessionRefs("p1", "p2")
 	assert.Equal(t, "p2", m.tasks[0].Project)
 	assert.Equal(t, "s2", m.tasks[0].Session)
 	assert.Equal(t, map[string]string{"s2": "opus"}, m.state.Models)

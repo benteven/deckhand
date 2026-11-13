@@ -565,10 +565,10 @@ func (m *model) moveSession(from, to string) {
 	if m.selected == from {
 		m.selected = to
 	}
-	m.remapSubs(from, to)
+	m.remapSessionRefs(from, to)
 }
 
-func (m *model) remapSubs(from, to string) {
+func (m *model) remapSessionRefs(from, to string) {
 	for i := range m.state.Subs {
 		if m.state.Subs[i].ID == from {
 			m.state.Subs[i].ID = to
@@ -607,6 +607,19 @@ func (m *model) remapSubs(from, to string) {
 	if v, ok := m.projectNotes[from]; ok {
 		m.projectNotes[to] = v
 		delete(m.projectNotes, from)
+	}
+	if m.closing[from] {
+		m.closing[to] = true
+		delete(m.closing, from)
+	}
+	if v, ok := m.closeRetry[from]; ok {
+		m.closeRetry[to] = v
+		delete(m.closeRetry, from)
+	}
+	for i := range m.pageAnswers {
+		if m.pageAnswers[i].id == from {
+			m.pageAnswers[i].id = to
+		}
 	}
 	for _, q := range m.state.Queues {
 		for i, id := range q {
