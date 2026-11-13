@@ -225,23 +225,54 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 	if !m.ops.Cfg.Assistant {
 		return nil
 	}
+	for id, ev := range next {
+		before, known := prev[id]
+		if !known || m.isAssistant(id) || m.ending[id] || !waits(ev) || waits(before) {
+			continue
+		}
+		i, task := m.taskOf(id)
+		if _, sub := m.state.SubOf(id); sub && !task {
+			continue
+		}
+		r, ok := m.rowByID(id)
+		if !ok || r.Kind != deck.Live || m.userIn(r) {
+			continue
+		}
+		text := strings.Join(strings.Fields(ev.Message), " ")
+		if text == "" {
+			text = "its turn ended"
+		}
+		note := fmt.Sprintf("[deckhand] %s (%s) waits for the user: %s", r.Name, id, text)
+		if task {
+			note = fmt.Sprintf("[deckhand] task %s \"%s\" waits for the user: %s", m.tasks[i].ID, m.tasks[i].Title, text)
+		}
+		m.notes = append(m.notes, note)
+	}
+	if over := len(m.notes) - maxNotes; over > 0 {
+		m.notes = m.notes[over:]
+	}
+	return m.deliverNotes()
+}
+
+func (m *model) followTaskWaits(prev, next map[string]events.State) tea.Cmd {
+	if !m.ops.Cfg.Assistant {
+		return nil
+	}
 	now, changed := time.Now(), false
 	var told []tea.Cmd
 	for id, ev := range next {
 		before, known := prev[id]
-		if !known || m.isAssistant(id) || m.ending[id] {
+		i, task := m.taskOf(id)
+		if !known || !task || m.ending[id] {
 			continue
 		}
-		i, task := m.taskOf(id)
-		if task && before.Waiting() && !ev.Waiting() && m.tasks[i].Status == "needs-you" {
-			m.tasks[i].Status, m.tasks[i].Need = "working", ""
-			m.tasks[i].Log(now, "working")
+		t := &m.tasks[i]
+		if before.Waiting() && !ev.Waiting() && t.Status == "needs-you" {
+			t.Status, t.Need = "working", ""
+			t.Log(now, "working")
 			changed = true
 		}
-		if !waits(ev) || waits(before) {
-			continue
-		}
-		if _, sub := m.state.SubOf(id); sub && !task {
+		if !waits(ev) || waits(before) || t.Status != "working" {
 			continue
 		}
 		r, ok := m.rowByID(id)
@@ -252,31 +283,17 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 		if text == "" {
 			text = "its turn ended"
 		}
-		note := fmt.Sprintf("[deckhand] %s (%s) waits for the user: %s", r.Name, id, text)
-		if task {
-			t := &m.tasks[i]
-			note = fmt.Sprintf("[deckhand] task %s \"%s\" waits for the user: %s", t.ID, t.Title, text)
-			if t.Status == "working" {
-				t.Status, t.Need = "needs-you", text
-				t.Log(now, "needs you: "+text)
-				changed = true
-				if !m.userIn(r) {
-					told = append(told, m.notifyNeed(*t))
-				}
-			}
+		t.Status, t.Need = "needs-you", text
+		t.Log(now, "needs you: "+text)
+		changed = true
+		if !m.userIn(r) {
+			told = append(told, m.notifyNeed(*t))
 		}
-		if m.userIn(r) {
-			continue
-		}
-		m.notes = append(m.notes, note)
-	}
-	if over := len(m.notes) - maxNotes; over > 0 {
-		m.notes = m.notes[over:]
 	}
 	if changed {
 		told = append(told, m.saveTasks())
 	}
-	return tea.Batch(append(told, m.deliverNotes())...)
+	return tea.Batch(told...)
 }
 
 func (m *model) assistantFree(r deck.Row) bool {
