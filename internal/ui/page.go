@@ -493,7 +493,7 @@ func (m *model) addChat(from, text string) tea.Cmd {
 }
 
 func (m *model) notifyNeed(t tasks.Task) tea.Cmd {
-	if m.web != nil && m.web.Clients() > 0 {
+	if m.web != nil && m.web.NotifyClients() > 0 {
 		return nil
 	}
 	need := t.Need

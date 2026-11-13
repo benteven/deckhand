@@ -71,6 +71,7 @@ type Server struct {
 	mux     *http.ServeMux
 	srv     *http.Server
 	clients atomic.Int64
+	notify  atomic.Int64
 
 	mu   sync.Mutex
 	view []byte
@@ -158,6 +159,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
+	if r.URL.Query().Get("notify") == "1" {
+		s.notify.Add(1)
+		defer s.notify.Add(-1)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	for {
@@ -217,6 +222,10 @@ func (s *Server) Publish(v View) {
 
 func (s *Server) Clients() int {
 	return int(s.clients.Load())
+}
+
+func (s *Server) NotifyClients() int {
+	return int(s.notify.Load())
 }
 
 func (s *Server) ListenAndServe() error {
