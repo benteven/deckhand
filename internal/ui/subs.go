@@ -82,6 +82,10 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 		case ok && m.resuming[sub.ID]:
 			return fail("%s is starting; try again later", r.Name)
 		}
+		if m.helperRole(sub.ID) {
+			m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == sub.ID })
+			return tea.Batch(m.saveState(), m.answer(req.ID, ctl.Reply{Out: "closed"}))
+		}
 		if _, err := os.Stat(ctl.Worktree(sub.Repo, sub.Name)); err != nil {
 			return fail("the worktree %s was removed", ctl.Worktree(sub.Repo, sub.Name))
 		}
@@ -117,6 +121,13 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 }
 
 func (m *model) queueCleanup(id string) tea.Cmd {
+	if i, ok := m.taskOf(id); ok && !m.tasks[i].Open() && m.merged(m.tasks[i]) {
+		return nil
+	}
+	return m.askCleanup(id)
+}
+
+func (m *model) askCleanup(id string) tea.Cmd {
 	if !slices.Contains(m.state.Cleanups, id) {
 		m.state.Cleanups = append(m.state.Cleanups, id)
 	}

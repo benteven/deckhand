@@ -204,6 +204,18 @@ func (m *model) typeIn(r deck.Row, text string, then func(error) tea.Cmd) tea.Cm
 	}
 }
 
+func (m *model) typeOrHold(r deck.Row, text string, hold func()) tea.Cmd {
+	return m.typeIn(r, text, func(err error) tea.Cmd {
+		switch {
+		case errors.Is(err, typing.ErrMenu):
+			hold()
+		case err != nil:
+			m.err = typeError(r.Name, err)
+		}
+		return nil
+	})
+}
+
 func (m *model) typed(msg typedMsg) tea.Cmd {
 	delete(m.typing, msg.pane)
 	if msg.then != nil {

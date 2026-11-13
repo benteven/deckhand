@@ -61,6 +61,7 @@ func List(claudeHome string) ([]File, error) {
 		return nil, err
 	}
 	files := make([]File, 0, len(paths))
+	seen := map[string]int{}
 	for _, p := range paths {
 		id := strings.TrimSuffix(filepath.Base(p), ".jsonl")
 		if !ValidID(id) {
@@ -70,9 +71,28 @@ func List(claudeHome string) ([]File, error) {
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		files = append(files, File{Path: p, SessionID: id, ModTime: info.ModTime()})
+		f := File{Path: p, SessionID: id, ModTime: info.ModTime()}
+		if i, ok := seen[id]; ok {
+			if better(f, files[i]) {
+				files[i] = f
+			}
+			continue
+		}
+		seen[id] = len(files)
+		files = append(files, f)
 	}
 	return files, nil
+}
+
+func inWorktree(path string) bool {
+	return strings.Contains(filepath.Base(filepath.Dir(path)), "--claude-worktrees-")
+}
+
+func better(a, b File) bool {
+	if inWorktree(a.Path) != inWorktree(b.Path) {
+		return !inWorktree(a.Path)
+	}
+	return a.ModTime.After(b.ModTime)
 }
 
 func ValidID(id string) bool {

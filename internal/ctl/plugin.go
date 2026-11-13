@@ -24,6 +24,43 @@ The deckhand binary is ` + exe + `.
 `
 }
 
+func tasksSkill(exe string) string {
+	return `---
+name: tasks
+description: List and start the tasks of a deckhand project, start roles, take a queue turn, and report the state of your own task.
+---
+
+The deckhand binary is ` + exe + `.
+
+1. A project: ` + "`" + exe + " task list`" + ` shows your open tasks as JSON lines.
+2. A project: ` + "`" + exe + " task start <id> [--model fable|opus|sonnet]`" + ` starts the task as a fork of your conversation, in its own worktree from the default branch. Opus is the default; use Fable only for a very important task.
+3. A project: ` + "`" + exe + " role list`" + ` shows the roles. ` + "`" + exe + " role start <role> --task <id>`" + ` starts one in the task's worktree.
+4. A task: ` + "`" + exe + " task update [--status S] [--need TEXT] [--waits-on W] [--pr URL]`" + ` changes your own task. S is todo, working, needs-you or waiting.
+5. A task: ` + "`" + exe + " task done [--summary TEXT]`" + ` when the PR is merged.
+6. A task that needs the user asks in its own reply and ends its turn. Deckhand sets a working task to needs-you and tells the assistant. Before a task ends a turn to wait for a tester, a role or the project, it runs ` + "`" + exe + " task update --status waiting --waits-on <who>`" + `, and ` + "`" + exe + " task update --status working`" + ` when it goes on.
+7. A role: ` + "`" + exe + " role model fable|opus|sonnet`" + ` restarts you on that model in the same conversation.
+8. A role: ` + "`" + exe + " queue take [name]`" + ` before you start the running system, and ` + "`" + exe + " queue give [name]`" + ` when you stop it. ` + "`" + exe + " queue list`" + ` shows the turns.
+`
+}
+
+func assistantTasksSkill(exe string) string {
+	return `---
+name: tasks
+description: Make, list, change and close the user's deckhand tasks, mark projects, answer the task page chat and read the queue. Only the assistant can use it.
+---
+
+The deckhand binary is ` + exe + `.
+
+1. ` + "`" + exe + " task new --title T [--prio urgent|high|normal|low] [--deadline YYYY-MM-DD] [--from F] [--project NAME] -- CONTEXT`" + `: prints the new task ID. With no project, the task is a plain to-do.
+2. ` + "`" + exe + " task list`" + `: open tasks as JSON lines.
+3. ` + "`" + exe + " task update <id> [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]`" + `.
+4. ` + "`" + exe + " task done <id> [--summary TEXT]`" + `.
+5. ` + "`" + exe + " project list`" + `, ` + "`" + exe + " project mark <id>`" + ` and ` + "`" + exe + " project unmark <id>`" + `. A project holds the context of one area and starts its tasks.
+6. ` + "`" + exe + " chat reply -- TEXT`" + `: answers the user in the chat on the task page.
+7. ` + "`" + exe + " queue list`" + `: who has each queue turn and who waits.
+`
+}
+
 func sessionsSkill(exe string) string {
 	return `---
 name: sessions
@@ -65,11 +102,12 @@ func writePlugin(dir string, skills map[string]string) error {
 }
 
 func WritePlugins(home, exe string) error {
-	if err := writePlugin(filepath.Join(home, "plugin"), map[string]string{"subsession": subsessionSkill(exe)}); err != nil {
+	if err := writePlugin(filepath.Join(home, "plugin"), map[string]string{"subsession": subsessionSkill(exe), "tasks": tasksSkill(exe)}); err != nil {
 		return err
 	}
 	return writePlugin(filepath.Join(home, "plugin-assistant"), map[string]string{
 		"subsession": subsessionSkill(exe),
 		"sessions":   sessionsSkill(exe),
+		"tasks":      assistantTasksSkill(exe),
 	})
 }

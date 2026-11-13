@@ -57,6 +57,26 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 			cmds = append(cmds, m.subRequest(req))
 			continue
 		}
+		if strings.HasPrefix(req.Op, "task-") {
+			cmds = append(cmds, m.taskRequest(req))
+			continue
+		}
+		if strings.HasPrefix(req.Op, "project-") {
+			cmds = append(cmds, m.projectRequest(req))
+			continue
+		}
+		if strings.HasPrefix(req.Op, "role-") {
+			cmds = append(cmds, m.roleRequest(req))
+			continue
+		}
+		if strings.HasPrefix(req.Op, "queue-") {
+			cmds = append(cmds, m.queueRequest(req))
+			continue
+		}
+		if strings.HasPrefix(req.Op, "chat-") {
+			cmds = append(cmds, m.chatRequest(req))
+			continue
+		}
 		cmds = append(cmds, m.handleRequest(req))
 	}
 	for id, at := range m.requests {
@@ -189,14 +209,17 @@ func (m *model) replyTyped(id, name, out string) func(error) tea.Cmd {
 func (m *model) listOut() string {
 	var lines []string
 	for _, r := range slices.Concat(m.active, m.suspended) {
-		ev := m.in.Events[r.SessionID]
-		line := listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Need: ev.Need, Message: ev.Message}
-		data, err := json.Marshal(line)
+		data, err := json.Marshal(m.listLineOf(r))
 		if err == nil {
 			lines = append(lines, string(data))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *model) listLineOf(r deck.Row) listLine {
+	ev := m.in.Events[r.SessionID]
+	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Need: ev.Need, Message: ev.Message}
 }
 
 func rowState(r deck.Row) string {

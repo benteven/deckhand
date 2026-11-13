@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,9 +10,13 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
-const excludeLine = "/.claude/worktrees/"
+const (
+	excludeLine  = "/.claude/worktrees/"
+	fetchTimeout = 60 * time.Second
+)
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
@@ -35,7 +40,61 @@ func git(dir string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+func TopLevel(dir string) string {
+	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	return top
+}
+
 func Create(cwd, name string) (dir, repo, branch string, err error) {
+	return add(cwd, name, func(string) (string, error) { return "HEAD", nil })
+}
+
+func CreateFrom(cwd, name string) (dir, repo, branch string, err error) {
+	return add(cwd, name, func(repo string) (string, error) {
+		base := defaultBranch(repo)
+		if err := fetch(repo, base); err != nil {
+			return "", fmt.Errorf("git fetch origin %s: %w", base, err)
+		}
+		return "origin/" + base, nil
+	})
+}
+
+func fetch(repo, branch string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "fetch", "--quiet", "origin", branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = 3 * time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("no answer in %s", fetchTimeout)
+	}
+	if text := strings.TrimSpace(string(out)); err != nil && text != "" {
+		return errors.New(text[strings.LastIndex(text, "\n")+1:])
+	}
+	return err
+}
+
+func defaultBranch(repo string) string {
+	ref, err := git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if b, ok := strings.CutPrefix(ref, "origin/"); err == nil && ok && b != "" {
+		return b
+	}
+	return "main"
+}
+
+func Taken(repo, name string) bool {
+	if _, err := os.Lstat(Worktree(repo, name)); err == nil {
+		return true
+	}
+	_, err := git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
+func add(cwd, name string, from func(repo string) (string, error)) (dir, repo, branch string, err error) {
 	out, err := git(cwd, "rev-parse", "--show-toplevel", "--show-prefix")
 	if err != nil {
 		return "", "", "", fmt.Errorf("%s is not in a git repo", cwd)
@@ -46,8 +105,12 @@ func Create(cwd, name string) (dir, repo, branch string, err error) {
 	if err := exclude(repo); err != nil {
 		return "", "", "", err
 	}
+	start, err := from(repo)
+	if err != nil {
+		return "", "", "", err
+	}
 	_, missing := git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if _, err := git(repo, "worktree", "add", "-b", branch, wt, "HEAD"); err != nil {
+	if _, err := git(repo, "worktree", "add", "--no-track", "-b", branch, wt, start); err != nil {
 		if missing != nil {
 			git(repo, "branch", "-D", branch)
 		}
@@ -101,7 +164,20 @@ func Remove(repo, name string, trash func(...string) error) error {
 	if err := trash(Worktree(repo, name)); err != nil {
 		return err
 	}
+	return Prune(repo)
+}
+
+func Prune(repo string) error {
 	_, err := git(repo, "worktree", "prune")
+	return err
+}
+
+func Head(repo, branch string) (string, error) {
+	return git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+}
+
+func DeleteBranch(repo, branch string) error {
+	_, err := git(repo, "branch", "-D", branch)
 	return err
 }
 

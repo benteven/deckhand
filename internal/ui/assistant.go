@@ -19,6 +19,7 @@ import (
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/typing"
@@ -47,6 +48,13 @@ func nightlyDue(last string, now time.Time) bool {
 
 func (m *model) isAssistant(id string) bool {
 	return m.ops.AssistantID != "" && id == m.ops.AssistantID
+}
+
+func (m *model) modelFor(id string) string {
+	if m.isAssistant(id) {
+		return m.ops.Cfg.AssistantModel
+	}
+	return m.state.Models[id]
 }
 
 func (m *model) setAssistantID(id string) {
@@ -219,26 +227,73 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 	}
 	for id, ev := range next {
 		before, known := prev[id]
-		if !known || !waits(ev) || waits(before) || m.isAssistant(id) || m.ending[id] {
+		if !known || m.isAssistant(id) || m.ending[id] || !waits(ev) || waits(before) {
 			continue
 		}
-		if _, sub := m.state.SubOf(id); sub {
+		i, task := m.taskOf(id)
+		if _, sub := m.state.SubOf(id); sub && !task {
 			continue
 		}
 		r, ok := m.rowByID(id)
-		if !ok || r.Kind != deck.Live || (m.slot == r.PaneID && !m.focused) {
+		if !ok || r.Kind != deck.Live || m.userIn(r) {
 			continue
 		}
 		text := strings.Join(strings.Fields(ev.Message), " ")
 		if text == "" {
 			text = "its turn ended"
 		}
-		m.notes = append(m.notes, fmt.Sprintf("[deckhand] %s (%s) waits for the user: %s", r.Name, id, text))
+		note := fmt.Sprintf("[deckhand] %s (%s) waits for the user: %s", r.Name, id, text)
+		if task {
+			note = fmt.Sprintf("[deckhand] task %s \"%s\" waits for the user: %s", m.tasks[i].ID, m.tasks[i].Title, text)
+		}
+		m.notes = append(m.notes, note)
 	}
 	if over := len(m.notes) - maxNotes; over > 0 {
 		m.notes = m.notes[over:]
 	}
 	return m.deliverNotes()
+}
+
+func (m *model) followTaskWaits(prev, next map[string]events.State) tea.Cmd {
+	if !m.ops.Cfg.Assistant {
+		return nil
+	}
+	now, changed := time.Now(), false
+	var told []tea.Cmd
+	for id, ev := range next {
+		before, known := prev[id]
+		i, task := m.taskOf(id)
+		if !known || !task || m.ending[id] {
+			continue
+		}
+		t := &m.tasks[i]
+		if before.Waiting() && !ev.Waiting() && t.Status == "needs-you" {
+			t.Status, t.Need = "working", ""
+			t.Log(now, "working")
+			changed = true
+		}
+		if !waits(ev) || waits(before) || t.Status != "working" {
+			continue
+		}
+		r, ok := m.rowByID(id)
+		if !ok || r.Kind != deck.Live {
+			continue
+		}
+		text := strings.Join(strings.Fields(ev.Message), " ")
+		if text == "" {
+			text = "its turn ended"
+		}
+		t.Status, t.Need = "needs-you", text
+		t.Log(now, "needs you: "+text)
+		changed = true
+		if !m.userIn(r) {
+			told = append(told, m.notifyNeed(*t))
+		}
+	}
+	if changed {
+		told = append(told, m.saveTasks())
+	}
+	return tea.Batch(told...)
 }
 
 func (m *model) assistantFree(r deck.Row) bool {
@@ -247,7 +302,7 @@ func (m *model) assistantFree(r deck.Row) bool {
 }
 
 func (m *model) userAway(r deck.Row) bool {
-	return !(m.slot == r.PaneID && !m.focused) && !m.in.Events[r.SessionID].Menu()
+	return !m.userIn(r) && !m.in.Events[r.SessionID].Menu()
 }
 
 func (m *model) deliverNotes() tea.Cmd {
@@ -331,6 +386,10 @@ func (m *model) setAssistant(on bool) tea.Cmd {
 			m.err = err
 			return nil
 		}
+		if err := roles.WriteDefaults(m.home); err != nil {
+			m.err = err
+			return nil
+		}
 	}
 	if err := store.SaveAssistant(m.home, on); err != nil {
 		m.err = err
@@ -339,11 +398,13 @@ func (m *model) setAssistant(on bool) tea.Cmd {
 	var stop tea.Cmd
 	m.ops.Cfg.Assistant = on
 	m.stopAssistant = false
+	var page tea.Cmd
 	if on {
 		m.state.Assistant.Paused = false
 		m.assistantTry = time.Time{}
 		m.ops.Rules, m.ops.AssistantID = ctl.Rules(), m.state.Assistant.ID
 		m.hint = "The assistant starts in a few seconds"
+		page = m.startWeb()
 	} else {
 		m.hint = "The assistant is off"
 		if r, ok := m.rowByID(m.state.Assistant.ID); ok {
@@ -358,7 +419,8 @@ func (m *model) setAssistant(on bool) tea.Cmd {
 		}
 		m.ops.Rules, m.ops.AssistantID = "", ""
 		m.notes, m.reprompt = nil, time.Time{}
+		m.stopWeb()
 	}
 	m.rebuild()
-	return tea.Batch(stop, m.saveState(), m.showSelected())
+	return tea.Batch(stop, page, m.saveState(), m.showSelected())
 }

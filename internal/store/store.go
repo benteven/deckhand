@@ -12,16 +12,20 @@ import (
 )
 
 type Config struct {
-	Prefix     string   `json:"prefix"`
-	ClaudeArgs []string `json:"claude_args"`
-	ListWidth  int      `json:"list_width"`
-	Assistant  bool     `json:"assistant"`
+	Prefix         string   `json:"prefix"`
+	ClaudeArgs     []string `json:"claude_args"`
+	ListWidth      int      `json:"list_width"`
+	Assistant      bool     `json:"assistant"`
+	AssistantModel string   `json:"assistant_model"`
+	WebPort        int      `json:"web_port"`
 }
 
 const (
-	DefaultListWidth = 36
-	MinListWidth     = 24
-	MaxListWidth     = 100
+	DefaultListWidth      = 36
+	DefaultAssistantModel = "sonnet"
+	DefaultWebPort        = 7317
+	MinListWidth          = 24
+	MaxListWidth          = 100
 )
 
 func ClampListWidth(w int) int {
@@ -39,7 +43,7 @@ func SaveAssistant(dir string, on bool) error {
 func saveConfigKey(dir, key string, value json.RawMessage) error {
 	path := filepath.Join(dir, "config.json")
 	raw := map[string]json.RawMessage{}
-	if err := readJSON(path, &raw); err != nil {
+	if err := ReadJSON(path, &raw); err != nil {
 		return err
 	}
 	if raw == nil {
@@ -109,9 +113,13 @@ type State struct {
 	Accounts  map[string]string    `json:"accounts,omitempty"`
 	Limits    map[string]time.Time `json:"limits,omitempty"`
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
+	Models    map[string]string    `json:"models,omitempty"`
+	Roles     map[string]string    `json:"roles,omitempty"`
+	Projects  []string             `json:"projects,omitempty"`
 	Assistant Assistant            `json:"assistant"`
 	Subs      []Subsession         `json:"subs,omitempty"`
 	Cleanups  []string             `json:"cleanups,omitempty"`
+	Queues    map[string][]string  `json:"queues,omitempty"`
 }
 
 func (s State) SubOf(id string) (Subsession, bool) {
@@ -130,7 +138,7 @@ func (s State) AccountFor(sessionID string) string {
 	return s.Account
 }
 
-func readJSON(path string, v any) error {
+func ReadJSON(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -142,9 +150,15 @@ func readJSON(path string, v any) error {
 }
 
 func LoadConfig(dir string) (Config, error) {
-	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth}
-	if err := readJSON(filepath.Join(dir, "config.json"), &c); err != nil {
-		return Config{Prefix: "C-b", ListWidth: DefaultListWidth}, err
+	c := Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel, WebPort: DefaultWebPort}
+	if err := ReadJSON(filepath.Join(dir, "config.json"), &c); err != nil {
+		return Config{Prefix: "C-b", ListWidth: DefaultListWidth, AssistantModel: DefaultAssistantModel, WebPort: DefaultWebPort}, err
+	}
+	if c.WebPort <= 0 || c.WebPort > 65535 {
+		c.WebPort = DefaultWebPort
+	}
+	if c.AssistantModel == "" {
+		c.AssistantModel = DefaultAssistantModel
 	}
 	if c.Prefix == "" || strings.EqualFold(c.Prefix, "C-j") || strings.EqualFold(c.Prefix, "C-k") {
 		c.Prefix = "C-b"
@@ -158,7 +172,7 @@ func LoadConfig(dir string) (Config, error) {
 
 func Load(dir string) (State, error) {
 	var s State
-	if err := readJSON(filepath.Join(dir, "state.json"), &s); err != nil {
+	if err := ReadJSON(filepath.Join(dir, "state.json"), &s); err != nil {
 		return State{}, err
 	}
 	if s.Names == nil {
@@ -188,7 +202,7 @@ func Claim(active []ActiveEntry, want int) int {
 }
 
 func (s State) Save(dir string) error {
-	return writeJSON(dir, "state.json", s)
+	return WriteJSON(dir, "state.json", s)
 }
 
 type PRState struct {
@@ -199,15 +213,15 @@ type PRState struct {
 
 func LoadPRs(dir string) (map[string]PRState, error) {
 	prs := map[string]PRState{}
-	err := readJSON(filepath.Join(dir, "prs.json"), &prs)
+	err := ReadJSON(filepath.Join(dir, "prs.json"), &prs)
 	return prs, err
 }
 
 func SavePRs(dir string, prs map[string]PRState) error {
-	return writeJSON(dir, "prs.json", prs)
+	return WriteJSON(dir, "prs.json", prs)
 }
 
-func writeJSON(dir, name string, v any) error {
+func WriteJSON(dir, name string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err

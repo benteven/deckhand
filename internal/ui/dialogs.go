@@ -425,9 +425,9 @@ func (m *model) withoutGone(files []transcript.File) []transcript.File {
 type restartDialog struct{ row deck.Row }
 
 type restartedMsg struct {
-	row      deck.Row
-	id, pane string
-	err      error
+	row       deck.Row
+	id, pane  string
+	err, warn error
 
 	stopFailed bool
 }
@@ -490,6 +490,7 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 		}
 		id = fresh
 	}
+	start := m.starter(ops, r.SessionID)
 	run := func() tea.Msg {
 		if r.Job != "" {
 			if err := ops.StopJob(r.Job, from); err != nil {
@@ -499,8 +500,8 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 		if err := ops.Stop(r.PaneID, r.Busy); err != nil {
 			return restartedMsg{row: r, err: err, stopFailed: true}
 		}
-		pane, err := ops.Start(r.Cwd, id, name, fresh == "", account, prompt)
-		return restartedMsg{row: r, id: id, pane: pane, err: err}
+		pane, warn, err := start(deck.Launch{Cwd: r.Cwd, SessionID: id, Name: name, Account: account, Prompt: prompt, Resume: fresh == ""})
+		return restartedMsg{row: r, id: id, pane: pane, err: err, warn: warn}
 	}
 	return tea.Sequence(m.showSelected(), run)
 }
@@ -524,16 +525,20 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	late := id == m.state.Assistant.ID && m.stopAssistant
+	if msg.warn != nil {
+		m.err = msg.warn
+	}
+	var moved tea.Cmd
 	if msg.id != id {
 		m.moveSession(id, msg.id)
-		id = msg.id
+		id, moved = msg.id, m.saveTasks()
 	}
 	m.in.Panes[id] = msg.pane
 	m.rebuild()
 	if late {
-		return tea.Batch(m.saveState(), m.stopLateAssistant(id))
+		return tea.Batch(m.saveState(), moved, m.stopLateAssistant(id))
 	}
-	return tea.Batch(m.saveState(), m.showSelected())
+	return tea.Batch(m.saveState(), moved, m.showSelected())
 }
 
 func (m *model) moveSession(from, to string) {
@@ -560,10 +565,10 @@ func (m *model) moveSession(from, to string) {
 	if m.selected == from {
 		m.selected = to
 	}
-	m.remapSubs(from, to)
+	m.remapSessionRefs(from, to)
 }
 
-func (m *model) remapSubs(from, to string) {
+func (m *model) remapSessionRefs(from, to string) {
 	for i := range m.state.Subs {
 		if m.state.Subs[i].ID == from {
 			m.state.Subs[i].ID = to
@@ -579,6 +584,49 @@ func (m *model) remapSubs(from, to string) {
 	}
 	if m.cleanup != nil && m.cleanup.sub.ID == from {
 		m.cleanup.sub.ID = to
+	}
+	for i := range m.tasks {
+		if m.tasks[i].Session == from {
+			m.tasks[i].Session = to
+		}
+		if m.tasks[i].Project == from {
+			m.tasks[i].Project = to
+		}
+	}
+	for i, id := range m.state.Projects {
+		if id == from {
+			m.state.Projects[i] = to
+		}
+	}
+	for _, links := range []map[string]string{m.state.Models, m.state.Roles, m.turns} {
+		if v, ok := links[from]; ok {
+			links[to] = v
+			delete(links, from)
+		}
+	}
+	if v, ok := m.projectNotes[from]; ok {
+		m.projectNotes[to] = v
+		delete(m.projectNotes, from)
+	}
+	if m.closing[from] {
+		m.closing[to] = true
+		delete(m.closing, from)
+	}
+	if v, ok := m.closeRetry[from]; ok {
+		m.closeRetry[to] = v
+		delete(m.closeRetry, from)
+	}
+	for i := range m.pageAnswers {
+		if m.pageAnswers[i].id == from {
+			m.pageAnswers[i].id = to
+		}
+	}
+	for _, q := range m.state.Queues {
+		for i, id := range q {
+			if id == from {
+				q[i] = to
+			}
+		}
 	}
 }
 
@@ -613,8 +661,8 @@ func (m *model) cleanupKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.cleanup = nil
 	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == sub.ID })
 	cmds := []tea.Cmd{m.saveState()}
-	if r, ok := m.rowByID(sub.ID); key == "y" && (m.resuming[sub.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere)) {
-		m.err = fmt.Errorf("%s is running; the worktree stays", sub.Name)
+	if name, ok := m.runningIn(sub.Dir); key == "y" && ok {
+		m.err = fmt.Errorf("%s is running; the worktree stays", name)
 	} else if key == "y" {
 		cmds = append(cmds, func() tea.Msg {
 			return worktreeRemovedMsg{id: sub.ID, err: ctl.Remove(sub.Repo, sub.Name, deck.Trash)}
@@ -633,7 +681,38 @@ func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 		m.err = msg.err
 		return nil
 	}
-	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == msg.id })
+	dir := ""
+	if sub, ok := m.state.SubOf(msg.id); ok {
+		dir = sub.Dir
+	}
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool {
+		return s.ID == msg.id || (s.Dir == dir && m.helperRole(s.ID))
+	})
+	var reset tea.Cmd
+	for i := range m.tasks {
+		if t := &m.tasks[i]; dir != "" && t.Dir == dir && t.Open() {
+			t.Session, t.Repo, t.Branch, t.Dir, t.Status, t.Need = "", "", "", "", "todo", ""
+			t.Log(time.Now(), "worktree removed")
+			reset = m.saveTasks()
+		}
+	}
 	m.rebuild()
-	return m.saveState()
+	return tea.Batch(m.saveState(), reset)
+}
+
+func (m *model) runningIn(dir string) (string, bool) {
+	for _, s := range m.state.Subs {
+		if s.Dir != dir {
+			continue
+		}
+		if m.running(s.ID) {
+			return s.Name, true
+		}
+	}
+	return "", false
+}
+
+func (m *model) running(id string) bool {
+	r, ok := m.rowByID(id)
+	return m.resuming[id] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "")
 }

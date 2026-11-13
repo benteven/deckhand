@@ -1,9 +1,14 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +21,11 @@ import (
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/preview"
 	"github.com/benteven/deckhand/internal/reviewui"
+	"github.com/benteven/deckhand/internal/roles"
 	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/ui"
+	"github.com/benteven/deckhand/internal/web"
 )
 
 var version = "dev"
@@ -63,8 +70,13 @@ func main() {
 		}
 	case "session":
 		runCtl("session", os.Args[2:])
-	case "sub":
-		runCtl("sub", os.Args[2:])
+	case "sub", "task", "project", "role", "queue", "chat":
+		runCtl(os.Args[1], os.Args[2:])
+	case "page":
+		if err := openPage(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "version":
 		fmt.Println(version)
 	case "ui":
@@ -101,6 +113,48 @@ func markBuild() {
 	if _, err := client.Run("set-option", "-p", "-t", pane, tmux.BuildOption, build); err != nil {
 		fmt.Fprintln(os.Stderr, "warning:", err)
 	}
+}
+
+func openPage() error {
+	home := paths.DeckHome()
+	cfg, err := store.LoadConfig(home)
+	if err != nil {
+		return err
+	}
+	if !cfg.Assistant {
+		return errors.New("the task page runs with the assistant; turn it on with G in the list")
+	}
+	token, err := web.Token(home)
+	if err != nil {
+		return err
+	}
+	if err := checkPage(cfg.WebPort, token); err != nil {
+		return err
+	}
+	return exec.Command(paths.Opener(), web.URL(cfg.WebPort, token)).Run()
+}
+
+func checkPage(port int, token string) error {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	nonce := hex.EncodeToString(raw)
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/hello?nonce=%s", port, nonce))
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("nothing listens on 127.0.0.1:%d; start deckhand first", port)
+	}
+	other := fmt.Errorf("something else listens on 127.0.0.1:%d", port)
+	if err != nil {
+		return other
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+	if err != nil || resp.StatusCode != http.StatusOK || !hmac.Equal(body, []byte(web.Proof(token, nonce))) {
+		return other
+	}
+	return nil
 }
 
 func runPreview(args []string) {
@@ -193,6 +247,9 @@ func setup() (tmux.Client, store.Config, string, error) {
 	}
 	if cfg.Assistant {
 		if err := ctl.WriteInstructions(filepath.Join(home, "assistant")); err != nil {
+			return tmux.Client{}, cfg, "", err
+		}
+		if err := roles.WriteDefaults(home); err != nil {
 			return tmux.Client{}, cfg, "", err
 		}
 	}

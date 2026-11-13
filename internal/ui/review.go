@@ -348,7 +348,7 @@ func (m *model) startReview(r deck.Row, prs []transcript.PRLink, chosen transcri
 			return fail(err)
 		}
 		prompt := review.NotesPrompt(pr, src, review.NotesPath(home, id, pr.Number))
-		pane, err := ops.Start(st.Cwd, id, "", false, account, prompt)
+		pane, err := ops.Start(deck.Launch{Cwd: st.Cwd, SessionID: id, Account: account, Prompt: prompt})
 		if err != nil {
 			return fail(err)
 		}
