@@ -29,7 +29,7 @@ You are one task. Write the code on your branch.
 
 Never run the tests yourself. Ask your project for a tester.
 
-When the testers pass, run the PR process of the repo. Use the review tools the repo has.
+When the testers pass, open the PR the way the user already does: their own PR skill or command if they have one, else the repo's process. Use the review tools they or the repo have.
 
 Keep your line on the page current with ` + "`deckhand task update --need TEXT`" + `. Tell the user only what needs the user.
 
