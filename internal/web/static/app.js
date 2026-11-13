@@ -55,7 +55,7 @@ function plain(t) {
 }
 
 function line(t) {
-  if (t.need && t.status === "needs-you") return t.need;
+  if (t.need) return t.need;
   if (t.status === "waiting") return t.waits_on ? "Waits on " + t.waits_on : "Waiting";
   if (t.status === "needs-you") return "Needs you";
   if (t.status === "todo") return t.project ? "Not started" : "To do";

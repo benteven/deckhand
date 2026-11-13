@@ -152,13 +152,17 @@ button {
 }
 
 .notifybtn {
-  margin-left: 1rem;
+  margin-right: 1.5rem;
   color: var(--muted);
   font-size: 0.8125rem;
 }
 
 .notifybtn[hidden] {
   display: none;
+}
+
+.notifybtn:not([hidden]) + .askbtn {
+  margin-left: 0;
 }
 
 kbd {
