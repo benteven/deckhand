@@ -125,7 +125,7 @@ When a subsession closes, deckhand asks you what to do with its worktree. Only y
 
 ### Assistant
 
-The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. Press `G` in the list to turn it on or off. Deckhand asks first, then writes the folder and starts the assistant at once; it saves `"assistant": true` in `~/.config/deckhand/config.json`. Sessions that already run get the standing rules when you restart them with `R`.
+The assistant is a standing Claude Code session that keeps track of your other sessions. It is off by default. Press `G` in the list to turn it on or off. Deckhand asks first, then writes the folder, saves `"assistant": true` in `~/.config/deckhand/config.json` and starts the assistant. Sessions that already run get the standing rules when you restart them with `R`.
 
 The assistant is the first row in the list, with the gray mark "assistant". It runs in `~/.config/deckhand/assistant`. On the first start deckhand writes `instructions.md` there and never overwrites it, so you can edit it. The assistant keeps its task list in `tasks.md` in the same folder.
 

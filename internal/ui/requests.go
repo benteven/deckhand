@@ -101,8 +101,12 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		if account == "" {
 			account = m.state.Account
 		}
+		text := req.Text
+		if text != "" {
+			text = viaAssistant(text)
+		}
 		id := uuid.NewV4().String()
-		return forRequest(m.start(id, req.Folder, req.Name, account, req.Text), req.ID, id)
+		return forRequest(m.start(id, req.Folder, req.Name, account, text), req.ID, id)
 	case "resume", "send", "handoff", "close":
 	default:
 		return fail("unknown request %s", req.Op)

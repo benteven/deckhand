@@ -523,12 +523,16 @@ func (m *model) restarted(msg restartedMsg) tea.Cmd {
 	if m.in.Panes == nil {
 		m.in.Panes = map[string]string{}
 	}
+	late := id == m.state.Assistant.ID && m.stopAssistant
 	if msg.id != id {
 		m.moveSession(id, msg.id)
 		id = msg.id
 	}
 	m.in.Panes[id] = msg.pane
 	m.rebuild()
+	if late {
+		return tea.Batch(m.saveState(), m.stopLateAssistant(id))
+	}
 	return tea.Batch(m.saveState(), m.showSelected())
 }
 

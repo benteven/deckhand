@@ -285,12 +285,13 @@ type model struct {
 	inDialog  bool
 	requests  map[string]time.Time
 
-	assistantTry time.Time
-	updating     bool
-	restartDue   bool
-	notes        []string
-	reprompt     time.Time
-	typing       map[string]bool
+	assistantTry  time.Time
+	stopAssistant bool
+	updating      bool
+	restartDue    bool
+	notes         []string
+	reprompt      time.Time
+	typing        map[string]bool
 }
 
 func Run(version string) error {
@@ -668,7 +669,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.toggleAgentMode()
 	case "G":
-		m.assist = &assistantDialog{on: !m.ops.Cfg.Assistant}
+		m.assist = &assistantDialog{on: !m.ops.Cfg.Assistant, dir: m.ops.AssistantDir}
 		return m.zoom(true)
 	case "c":
 		if r, ok := m.current(); ok {
@@ -1119,6 +1120,10 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	m.in.Panes[msg.id] = msg.pane
+	if msg.id == m.state.Assistant.ID && m.stopAssistant {
+		m.rebuild()
+		return tea.Batch(m.saveState(), m.stopLateAssistant(msg.id))
+	}
 	if msg.req != "" {
 		m.rebuild()
 		return tea.Batch(m.saveState(), m.answer(msg.req, ctl.Reply{Out: msg.out}))
