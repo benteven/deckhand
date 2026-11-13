@@ -688,8 +688,16 @@ func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool {
 		return s.ID == msg.id || (s.Dir == dir && m.helperRole(s.ID))
 	})
+	var reset tea.Cmd
+	for i := range m.tasks {
+		if t := &m.tasks[i]; dir != "" && t.Dir == dir && t.Status != "done" {
+			t.Session, t.Repo, t.Branch, t.Dir, t.Status, t.Need = "", "", "", "", "todo", ""
+			t.Log(time.Now(), "worktree removed")
+			reset = m.saveTasks()
+		}
+	}
 	m.rebuild()
-	return m.saveState()
+	return tea.Batch(m.saveState(), reset)
 }
 
 func (m *model) runningIn(dir string) (string, bool) {
