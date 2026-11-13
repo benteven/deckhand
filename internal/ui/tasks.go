@@ -333,7 +333,7 @@ func (m *model) startTask(req ctl.Request) tea.Cmd {
 		return fail("only the project of task %s can start it", t.ID)
 	case t.Status == "done":
 		return fail("task %s is done", t.ID)
-	case t.Session != "":
+	case t.Session != "" || m.taskStarts[t.ID]:
 		return fail("task %s has a session already", t.ID)
 	}
 	model := req.Args["model"]
@@ -353,13 +353,16 @@ func (m *model) startTask(req ctl.Request) tea.Cmd {
 		name = alt
 	}
 	id := uuid.NewV4().String()
-	m.tasks[i].Session = id
+	if m.taskStarts == nil {
+		m.taskStarts = map[string]bool{}
+	}
+	m.taskStarts[t.ID] = true
 	cwd, home := m.state.Active[k].Cwd, m.home
 	return func() tea.Msg {
 		if repo := ctl.TopLevel(cwd); repo != "" && ctl.Taken(repo, name) {
 			name = alt
 		}
-		dir, repo, branch, err := ctl.CreateFrom(cwd, name, "")
+		dir, repo, branch, err := ctl.CreateFrom(cwd, name)
 		if err == nil && model == "" {
 			model = taskModel
 			if r, rerr := roles.Find(home, repo, taskRole); rerr == nil && r.Model != "" {
@@ -372,14 +375,18 @@ func (m *model) startTask(req ctl.Request) tea.Cmd {
 
 func (m *model) taskCreated(msg taskCreatedMsg) tea.Cmd {
 	req := msg.req
-	i, ok := m.taskOf(msg.id)
-	if !ok {
-		return m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("task %s is gone", req.Target)})
-	}
+	delete(m.taskStarts, req.Target)
 	if msg.err != nil {
-		m.tasks[i].Session = ""
 		return m.answer(req.ID, ctl.Reply{Err: msg.err.Error()})
 	}
+	i := slices.IndexFunc(m.tasks, func(t tasks.Task) bool { return t.ID == req.Target })
+	switch {
+	case i < 0:
+		return tea.Batch(dropWorktree(msg.repo, msg.name, msg.branch), m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("task %s is gone", req.Target)}))
+	case m.tasks[i].Status == "done":
+		return tea.Batch(dropWorktree(msg.repo, msg.name, msg.branch), m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("task %s is done", req.Target)}))
+	}
+	m.tasks[i].Session = msg.id
 	project := req.Caller
 	m.state.Subs = append(m.state.Subs, store.Subsession{ID: msg.id, Parent: project, Name: msg.name, Dir: msg.dir, Repo: msg.repo, Branch: msg.branch})
 	if m.state.Models == nil {
@@ -400,6 +407,42 @@ func (m *model) taskCreated(msg taskCreatedMsg) tea.Cmd {
 		msg.taskStart = true
 		return msg
 	})
+}
+
+func dropWorktree(repo, name, branch string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if _, serr := os.Stat(ctl.Worktree(repo, name)); serr == nil {
+			err = ctl.Remove(repo, name, deck.Trash)
+		} else {
+			err = ctl.Prune(repo)
+		}
+		if err == nil {
+			err = ctl.DeleteBranch(repo, branch)
+		}
+		if err != nil {
+			return errMsg{err}
+		}
+		return nil
+	}
+}
+
+func (m *model) taskStartFailed(i int, id string) tea.Cmd {
+	t := &m.tasks[i]
+	t.Session, t.Repo, t.Branch, t.Dir = "", "", "", ""
+	if t.Status != "done" {
+		t.Status = "todo"
+	}
+	var drop tea.Cmd
+	if sub, ok := m.state.SubOf(id); ok {
+		drop = dropWorktree(sub.Repo, sub.Name, sub.Branch)
+	}
+	m.state.Subs = slices.DeleteFunc(m.state.Subs, func(s store.Subsession) bool { return s.ID == id })
+	delete(m.state.Models, id)
+	delete(m.state.Roles, id)
+	delete(m.state.Accounts, id)
+	delete(m.state.Fallbacks, id)
+	return tea.Batch(m.saveState(), m.saveTasks(), drop)
 }
 
 func taskPrompt(t tasks.Task) string {

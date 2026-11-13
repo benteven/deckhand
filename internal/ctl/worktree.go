@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,9 +10,13 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
-const excludeLine = "/.claude/worktrees/"
+const (
+	excludeLine  = "/.claude/worktrees/"
+	fetchTimeout = 60 * time.Second
+)
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
@@ -47,16 +52,30 @@ func Create(cwd, name string) (dir, repo, branch string, err error) {
 	return add(cwd, name, func(string) (string, error) { return "HEAD", nil })
 }
 
-func CreateFrom(cwd, name, base string) (dir, repo, branch string, err error) {
+func CreateFrom(cwd, name string) (dir, repo, branch string, err error) {
 	return add(cwd, name, func(repo string) (string, error) {
-		if base == "" {
-			base = defaultBranch(repo)
-		}
-		if _, err := git(repo, "fetch", "--quiet", "origin", base); err != nil {
+		base := defaultBranch(repo)
+		if err := fetch(repo, base); err != nil {
 			return "", fmt.Errorf("git fetch origin %s: %w", base, err)
 		}
 		return "origin/" + base, nil
 	})
+}
+
+func fetch(repo, branch string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "fetch", "--quiet", "origin", branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = 3 * time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("no answer in %s", fetchTimeout)
+	}
+	if text := strings.TrimSpace(string(out)); err != nil && text != "" {
+		return errors.New(text[strings.LastIndex(text, "\n")+1:])
+	}
+	return err
 }
 
 func defaultBranch(repo string) string {

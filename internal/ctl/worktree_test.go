@@ -30,7 +30,7 @@ func TestCreateFromDefaultBranch(t *testing.T) {
 	run(clone, "checkout", "-q", "-b", "other")
 	run(clone, "commit", "-q", "--allow-empty", "-m", "B")
 
-	_, _, branch, err := CreateFrom(clone, "t1", "")
+	_, _, branch, err := CreateFrom(clone, "t1")
 	if err != nil {
 		t.Fatal(err)
 	}

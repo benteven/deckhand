@@ -313,6 +313,7 @@ type model struct {
 	asking        map[string]bool
 	projectNotes  map[string][]string
 	closing       map[string]bool
+	taskStarts    map[string]bool
 	idleSince     map[string]time.Time
 
 	send        func(tea.Msg)
@@ -1166,8 +1167,8 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		if msg.req != "" {
 			reply := m.answer(msg.req, ctl.Reply{Err: msg.err.Error()})
 			if i, ok := m.taskOf(msg.id); ok && msg.taskStart {
-				m.tasks[i].Session, m.tasks[i].Status = "", "todo"
-				return tea.Batch(m.saveTasks(), reply)
+				m.rebuild()
+				return tea.Batch(m.taskStartFailed(i, msg.id), reply)
 			}
 			return reply
 		}
