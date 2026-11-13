@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/benteven/deckhand/internal/ctl"
-	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/roles"
 )
 
@@ -133,7 +132,7 @@ func (m *model) pruneQueues(now time.Time) tea.Cmd {
 	for _, q := range m.state.Queues {
 		for _, id := range q {
 			queued[id] = true
-			if r, ok := m.rowByID(id); m.resuming[id] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "") {
+			if m.running(id) {
 				delete(m.stoppedAt, id)
 				continue
 			}

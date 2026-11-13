@@ -697,9 +697,14 @@ func (m *model) runningIn(dir string) (string, bool) {
 		if s.Dir != dir {
 			continue
 		}
-		if r, ok := m.rowByID(s.ID); m.resuming[s.ID] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "") {
+		if m.running(s.ID) {
 			return s.Name, true
 		}
 	}
 	return "", false
+}
+
+func (m *model) running(id string) bool {
+	r, ok := m.rowByID(id)
+	return m.resuming[id] || ok && (r.Kind == deck.Live || r.Kind == deck.Elsewhere || r.Job != "")
 }

@@ -546,7 +546,7 @@ func (m *model) roleRequest(req ctl.Request) tea.Cmd {
 		switch {
 		case !ok || r.Kind != deck.Live || m.resuming[r.SessionID]:
 			return fail("this session is not running in deckhand")
-		case m.slot == r.PaneID && !m.focused:
+		case m.userIn(r):
 			return fail("the user is in %s now; try again later", r.Name)
 		}
 		if m.state.Models == nil {
@@ -784,12 +784,11 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 			continue
 		}
 		r, ok := m.rowByID(s.ID)
-		live := ok && r.Kind == deck.Live
 		switch {
-		case m.resuming[s.ID], ok && (r.Kind == deck.Elsewhere || r.Job != ""), !live && m.in.Panes[s.ID] != "", live && m.slot == r.PaneID && !m.focused:
-			return nil
-		case live:
+		case ok && r.Kind == deck.Live && r.Job == "" && !m.resuming[s.ID] && !m.userIn(r):
 			rows = append(rows, r)
+		case m.running(s.ID) || m.in.Panes[s.ID] != "":
+			return nil
 		}
 	}
 	if m.closing == nil {
@@ -918,8 +917,5 @@ func (m *model) projectIdle(r deck.Row) bool {
 	if slices.ContainsFunc(m.tasks, func(t tasks.Task) bool { return t.Project == id && slices.Contains(taskStatuses, t.Status) }) {
 		return false
 	}
-	return !slices.ContainsFunc(m.state.Subs, func(s store.Subsession) bool {
-		sr, ok := m.rowByID(s.ID)
-		return s.Parent == id && (m.resuming[s.ID] || ok && (sr.Kind == deck.Live || sr.Kind == deck.Elsewhere))
-	})
+	return !slices.ContainsFunc(m.state.Subs, func(s store.Subsession) bool { return s.Parent == id && m.running(s.ID) })
 }
