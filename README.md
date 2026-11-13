@@ -79,7 +79,8 @@ In the list:
 
 | Key | Does |
 | --- | --- |
-| arrows, `j` / `k` | Move; the right side follows |
+| arrows, `j` / `k` | Move between sessions and skip subsessions; the right side follows. In a search, move through every match |
+| `ctrl-↑` / `ctrl-↓`, `J` / `K` | Move one row, subsessions too |
 | Enter | Open the session, or resume a suspended one |
 | Esc | Back to the session you came from |
 | `1` ... `9` | Go to that session |

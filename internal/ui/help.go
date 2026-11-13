@@ -29,7 +29,8 @@ func helpSections(prefix string) []helpSection {
 			{p + " ctrl-j / k / q / \\", "Send that key to Claude Code"},
 		}},
 		{"In the list", [][2]string{
-			{"↑↓ / j k", "Move; the right side follows"},
+			{"↑↓ / j k", "Move between sessions, skip subsessions; the right side follows"},
+			{"ctrl-↑↓ / J K", "Move one row, subsessions too"},
 			{"enter", "Open, or resume a suspended session"},
 			{"esc", "Back to the session you came from"},
 			{"1-9", "Go to that session"},

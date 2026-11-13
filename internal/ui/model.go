@@ -657,8 +657,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "up", "k":
-		return m.move(-1)
+		return m.hop(-1)
 	case "down", "j":
+		return m.hop(1)
+	case "ctrl+up", "K":
+		return m.move(-1)
+	case "ctrl+down", "J":
 		return m.move(1)
 	case "enter":
 		return m.enter()
@@ -1058,6 +1062,19 @@ func (m *model) move(d int) tea.Cmd {
 		return m.moveAgent(d)
 	}
 	return m.selectIndex(m.cursor + d)
+}
+
+func (m *model) hop(d int) tea.Cmd {
+	if m.agentMode || m.query != "" {
+		return m.move(d)
+	}
+	rows := m.shown()
+	for i := m.cursor + d; i >= 0 && i < len(rows); i += d {
+		if rows[i].Parent == "" {
+			return m.selectIndex(i)
+		}
+	}
+	return nil
 }
 
 func (m *model) selectIndex(i int) tea.Cmd {
