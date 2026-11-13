@@ -626,9 +626,10 @@ func (m *model) roleFound(msg roleFoundMsg) tea.Cmd {
 }
 
 const (
-	mergedLog   = "PR merged; asked for a summary"
-	askedLog    = "asked about the worktree"
-	projectIdle = 10 * time.Minute
+	mergedLog    = "PR merged; asked for a summary"
+	askedLog     = "asked about the worktree"
+	projectIdle  = 10 * time.Minute
+	closeBackoff = 5 * time.Minute
 )
 
 type taskClosedMsg struct {
@@ -640,7 +641,7 @@ type taskClosedMsg struct {
 }
 
 func (m *model) taskTick(now time.Time) tea.Cmd {
-	return tea.Batch(m.askSummaries(), m.deliverProjectNotes(), m.closeDoneTasks(), m.suspendIdleProjects(now))
+	return tea.Batch(m.askSummaries(), m.deliverProjectNotes(), m.closeDoneTasks(now), m.suspendIdleProjects(now))
 }
 
 func (m *model) notesPath(id string) string {
@@ -661,10 +662,7 @@ func (m *model) askSummaries() tea.Cmd {
 		if t.Status == "done" || t.Session == "" || t.PR == "" || m.asking[t.ID] {
 			continue
 		}
-		if e := m.prs[t.PR]; e == nil || e.state != "merged" {
-			continue
-		}
-		if logged(t, mergedLog) {
+		if e := m.prs[t.PR]; e == nil || e.state != "merged" || !t.SummaryAsked.IsZero() {
 			continue
 		}
 		r, ok := m.rowByID(t.Session)
@@ -686,10 +684,12 @@ func (m *model) askSummaries() tea.Cmd {
 				m.err = typeError(r.Name, err)
 			}
 			k := slices.IndexFunc(m.tasks, func(t tasks.Task) bool { return t.ID == id })
-			if k < 0 {
+			if k < 0 || err != nil && !errors.Is(err, typing.ErrPasted) {
 				return nil
 			}
-			m.tasks[k].Log(time.Now(), mergedLog)
+			now := time.Now()
+			m.tasks[k].SummaryAsked = now
+			m.tasks[k].Log(now, mergedLog)
 			return m.saveTasks()
 		}))
 	}
@@ -754,10 +754,10 @@ func (m *model) deliverProjectNotes() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *model) closeDoneTasks() tea.Cmd {
+func (m *model) closeDoneTasks(now time.Time) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, t := range m.tasks {
-		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) || logged(t, askedLog) {
+		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) || !t.CleanupAsked.IsZero() || now.Before(m.closeRetry[t.Session]) {
 			continue
 		}
 		if m.cleanup != nil && m.cleanup.sub.ID == t.Session {
@@ -841,10 +841,18 @@ func (m *model) taskClosed(msg taskClosedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.err = msg.err
 		delete(m.closing, msg.id)
+		if m.closeRetry == nil {
+			m.closeRetry = map[string]time.Time{}
+		}
+		m.closeRetry[msg.id] = time.Now().Add(closeBackoff)
+	} else {
+		delete(m.closeRetry, msg.id)
 	}
 	if msg.ask {
 		if i, ok := m.taskOf(msg.id); ok {
-			m.tasks[i].Log(time.Now(), askedLog)
+			now := time.Now()
+			m.tasks[i].CleanupAsked = now
+			m.tasks[i].Log(now, askedLog)
 		}
 		m.rebuild()
 		return tea.Batch(m.saveTasks(), m.askCleanup(msg.id))
@@ -856,10 +864,6 @@ func (m *model) taskClosed(msg taskClosedMsg) tea.Cmd {
 	delete(m.closing, msg.id)
 	m.state.Cleanups = slices.DeleteFunc(m.state.Cleanups, func(id string) bool { return id == msg.id })
 	return m.worktreeRemoved(worktreeRemovedMsg{id: msg.id})
-}
-
-func logged(t tasks.Task, text string) bool {
-	return slices.ContainsFunc(t.History, func(e tasks.Entry) bool { return e.Text == text })
 }
 
 func (m *model) merged(t tasks.Task) bool {

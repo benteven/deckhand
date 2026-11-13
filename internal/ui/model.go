@@ -314,6 +314,7 @@ type model struct {
 	projectNotes  map[string][]string
 	closing       map[string]bool
 	taskStarts    map[string]bool
+	closeRetry    map[string]time.Time
 	idleSince     map[string]time.Time
 
 	send        func(tea.Msg)

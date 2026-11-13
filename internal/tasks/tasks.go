@@ -37,6 +37,9 @@ type Task struct {
 	History  []Entry   `json:"history"`
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"`
+
+	SummaryAsked time.Time `json:"summary_asked,omitzero"`
+	CleanupAsked time.Time `json:"cleanup_asked,omitzero"`
 }
 
 func Load(home string) ([]Task, error) {
