@@ -657,8 +657,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "up", "k":
-		return m.move(-1)
+		return m.hop(-1)
 	case "down", "j":
+		return m.hop(1)
+	case "ctrl+up", "K":
+		return m.move(-1)
+	case "ctrl+down", "J":
 		return m.move(1)
 	case "enter":
 		return m.enter()
@@ -704,6 +708,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			order = append(order, s.SessionID)
 		}
 		m.rename = newRenameDialog(r, msg.String() == "s", order)
+		if m.rename.suspend {
+			m.rename.subs = m.liveSubs(r.SessionID)
+		}
 		return m.rename.input.Focus()
 	case "t":
 		r, ok := m.current()
@@ -834,6 +841,12 @@ func (m *model) switchLive(next bool) tea.Cmd {
 	default:
 		i = len(rows) - 1
 	}
+	for n := 0; rows[i].Parent != "" && n < len(rows); n++ {
+		i = (i + step + len(rows)) % len(rows)
+	}
+	if rows[i].Parent != "" {
+		return nil
+	}
 	return m.switchTo(rows[i])
 }
 
@@ -963,7 +976,22 @@ func (m *model) confirmRename(d *renameDialog) tea.Cmd {
 	if i < 0 || m.shown()[i].Kind != deck.Live || m.shown()[i].PaneID != d.pane {
 		return m.saveState()
 	}
-	return m.suspend(m.shown()[i], "")
+	subs := m.liveSubs(d.id)
+	cmds := []tea.Cmd{m.suspend(m.shown()[i], "")}
+	for _, r := range subs {
+		cmds = append(cmds, m.suspend(r, ""))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) liveSubs(id string) []deck.Row {
+	var out []deck.Row
+	for _, r := range m.active {
+		if r.Parent == id && r.Kind == deck.Live {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (m *model) detach(r deck.Row) (store.ActiveEntry, tea.Cmd) {
@@ -1058,6 +1086,19 @@ func (m *model) move(d int) tea.Cmd {
 		return m.moveAgent(d)
 	}
 	return m.selectIndex(m.cursor + d)
+}
+
+func (m *model) hop(d int) tea.Cmd {
+	if m.agentMode || m.query != "" {
+		return m.move(d)
+	}
+	rows := m.shown()
+	for i := m.cursor + d; i >= 0 && i < len(rows); i += d {
+		if rows[i].Parent == "" {
+			return m.selectIndex(i)
+		}
+	}
+	return nil
 }
 
 func (m *model) selectIndex(i int) tea.Cmd {

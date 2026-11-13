@@ -212,6 +212,7 @@ type renameDialog struct {
 	fresh    bool
 	order    []string
 	kind     deck.Kind
+	subs     []deck.Row
 }
 
 func newRenameDialog(r deck.Row, suspend bool, order []string) *renameDialog {
@@ -264,6 +265,17 @@ func (d *renameDialog) hint(w int) string {
 	}
 	if d.suspend && d.busy {
 		lines = append(lines, yellow.Render(ansi.Truncate("Busy: suspending stops the turn", w, "…")))
+	}
+	if d.suspend && len(d.subs) > 0 {
+		text := "Also suspends 1 subsession"
+		if len(d.subs) > 1 {
+			text = fmt.Sprintf("Also suspends %d subsessions", len(d.subs))
+		}
+		if n := len(slices.DeleteFunc(slices.Clone(d.subs), func(r deck.Row) bool { return !r.Busy })); n > 0 {
+			lines = append(lines, yellow.Render(ansi.Truncate(fmt.Sprintf("%s, %d working", text, n), w, "…")))
+		} else {
+			lines = append(lines, gray.Render(ansi.Truncate(text, w, "…")))
+		}
 	}
 	return strings.Join(lines, "\n")
 }

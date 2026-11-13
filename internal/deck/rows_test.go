@@ -91,3 +91,21 @@ func TestAssistantAndSubsessionRows(t *testing.T) {
 	assert.Equal(t, []string{"p", "c2", "c1"}, ids(Family(active, "c1")))
 	assert.Empty(t, Family(active, "x"))
 }
+
+func TestSuspendedParentRows(t *testing.T) {
+	in := Inputs{
+		State: store.State{
+			Subs:   []store.Subsession{{ID: "c", Parent: "p"}, {ID: "s", Parent: "p"}},
+			Active: []store.ActiveEntry{{SessionID: "x"}, {SessionID: "c"}},
+		},
+		Panes: map[string]string{"x": "%1", "c": "%2"},
+		Files: []transcript.File{{SessionID: "p"}, {SessionID: "s"}, {SessionID: "q"}},
+	}
+	active, suspended := Build(in)
+	assert.Equal(t, []string{"x", "p", "c"}, ids(active))
+	assert.Equal(t, Suspended, active[1].Kind)
+	assert.Equal(t, "p", active[2].Parent)
+	assert.Empty(t, active[2].Orphan)
+	assert.Equal(t, []string{"p", "s", "q"}, ids(suspended))
+	assert.Equal(t, "p", suspended[1].Parent)
+}

@@ -19,8 +19,8 @@ func helpSections(prefix string) []helpSection {
 	return []helpSection{
 		{"Anywhere", [][2]string{
 			{p, "Focus the list"},
-			{"ctrl-j / ctrl-k", "Next or previous session"},
-			{"ctrl-q / ctrl-shift-q", "Next or previous in the list like Cmd-Tab; the pick moves to the top"},
+			{"ctrl-j / ctrl-k", "Next or previous session, without subsessions"},
+			{"ctrl-q / ctrl-shift-q", "Next or previous in the list like Cmd-Tab, without subsessions"},
 			{"ctrl-\\", "Next session in this family: the parent and its subsessions"},
 			{p + " 1-9", "Go to session 1 to 9"},
 			{p + " < / >", "Narrower or wider list"},
@@ -29,7 +29,8 @@ func helpSections(prefix string) []helpSection {
 			{p + " ctrl-j / k / q / \\", "Send that key to Claude Code"},
 		}},
 		{"In the list", [][2]string{
-			{"↑↓ / j k", "Move; the right side follows"},
+			{"↑↓ / j k", "Move between sessions, skip subsessions; the right side follows"},
+			{"ctrl-↑↓ / J K", "Move one row, subsessions too"},
 			{"enter", "Open, or resume a suspended session"},
 			{"esc", "Back to the session you came from"},
 			{"1-9", "Go to that session"},

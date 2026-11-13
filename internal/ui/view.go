@@ -200,7 +200,8 @@ func (m *model) searchLine(w int) string {
 
 func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState func(string) prStatus, name lipgloss.Style, hit, query string) []string {
 	bar := selectionBar(selected)
-	inner := max(w-2, 1)
+	pad := subPad(r)
+	inner := max(w-2-len(pad), 1)
 	meta := []string{gray.Render(ago(now, r.LastInteraction))}
 	if r.Cwd != "" {
 		meta = append(meta, gray.Render(textclean.Clean(filepath.Base(r.Cwd))))
@@ -209,14 +210,14 @@ func suspendedLines(r deck.Row, w int, now time.Time, selected bool, prState fun
 		meta = append(meta, prText(pr, prState(pr.URL), true))
 	}
 	lines := []string{
-		name.Render(ansi.Truncate(r.Name, inner, "…")),
+		name.Render(ansi.Truncate(subName(r), inner, "…")),
 		fitItems(meta, inner),
 	}
 	if hit != "" {
 		lines = append(lines, ansi.Truncate(highlight(textclean.Clean(hit), query), inner, "…"))
 	}
 	for i, l := range lines {
-		lines[i] = ansi.Truncate(bar+l, w, "")
+		lines[i] = ansi.Truncate(bar+pad+l, w, "")
 	}
 	return lines
 }
@@ -280,7 +281,7 @@ func selectionBar(selected bool) string {
 }
 
 func rowLines(r deck.Row, w int, selected bool, agent int, prState func(string) prStatus, account string, name lipgloss.Style) []string {
-	if r.Kind == deck.Stale {
+	if r.Kind == deck.Stale || r.Kind == deck.Suspended && !r.Assistant {
 		return staleLines(r, w, selected, prState)
 	}
 	bar := selectionBar(selected)
@@ -348,6 +349,9 @@ func rowMarks(r deck.Row) string {
 		if r.Paused {
 			mark += " " + gray.Render("paused")
 		}
+	}
+	if r.Kind == deck.Suspended && !r.Assistant {
+		mark += " " + gray.Render("suspended")
 	}
 	if r.Orphan != "" {
 		mark += " " + gray.Render("sub of "+r.Orphan)

@@ -124,6 +124,9 @@ func (m *model) queueCleanup(id string) tea.Cmd {
 	if i, ok := m.taskOf(id); ok && !m.tasks[i].Open() && m.merged(m.tasks[i]) {
 		return nil
 	}
+	if sub, ok := m.state.SubOf(id); ok && slices.ContainsFunc(m.suspended, func(r deck.Row) bool { return r.SessionID == sub.Parent }) {
+		return nil
+	}
 	return m.askCleanup(id)
 }
 

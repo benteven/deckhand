@@ -63,11 +63,11 @@ From anywhere:
 | Key | Does |
 | --- | --- |
 | `ctrl-b` | Focus the list |
-| `ctrl-j` / `ctrl-k` | Next or previous session |
+| `ctrl-j` / `ctrl-k` | Next or previous session, without subsessions |
 | `ctrl-b 1` ... `ctrl-b 9` | Go to session 1 to 9 |
 | `ctrl-b <` / `ctrl-b >` | Narrower or wider list |
 | `ctrl-b ?` | Show all keys |
-| `ctrl-q` or `ctrl-b ctrl-b` | Like Cmd-Tab: go to the next session in the list, press again to go further; when you release ctrl, the pick moves to the top |
+| `ctrl-q` or `ctrl-b ctrl-b` | Like Cmd-Tab: go to the next session in the list (subsessions are skipped), press again to go further; when you release ctrl, the pick moves to the top |
 | `ctrl-shift-q` | The same, from the bottom of the list up |
 | `ctrl-\` | Next session in the same family: the parent, then its subsessions |
 | `ctrl-b ctrl-j`, `ctrl-b ctrl-k`, `ctrl-b ctrl-q`, `ctrl-b ctrl-\` | Send that key to Claude Code |
@@ -79,7 +79,8 @@ In the list:
 
 | Key | Does |
 | --- | --- |
-| arrows, `j` / `k` | Move; the right side follows |
+| arrows, `j` / `k` | Move between sessions and skip subsessions; the right side follows. In a search, move through every match |
+| `ctrl-↑` / `ctrl-↓`, `J` / `K` | Move one row, subsessions too |
 | Enter | Open the session, or resume a suspended one |
 | Esc | Back to the session you came from |
 | `1` ... `9` | Go to that session |
@@ -119,9 +120,9 @@ When a session hits a usage limit, the deck moves it to an account without a lim
 
 A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
 
-In the list, subsessions sit under their parent, indented with `↳`. A subsession whose parent is not running shows "sub of" and the parent's name. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
+In the list, subsessions sit under their parent, indented with `↳`. When the parent is suspended, it shows in gray at its place with "suspended", and Enter resumes it. A subsession whose parent is gone shows "sub of" and the parent's name. In Suspended, a suspended subsession sits under its suspended parent. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
 
-When a subsession closes, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
+Suspending a parent with `s` suspends its running subsessions too, and the prompt says how many are working. They keep their worktrees and wait under the parent in Suspended. When a subsession closes while its parent runs, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
 
 ### Assistant
 
