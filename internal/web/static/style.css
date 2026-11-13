@@ -85,7 +85,8 @@ button {
   display: flex;
   align-items: baseline;
   gap: 2rem;
-  padding: 1.125rem max(var(--edge), calc((100% - 72rem) / 2)) 0;
+  --left: max(var(--edge), calc((100% - 72rem) / 2));
+  padding: 1.125rem var(--left) 0;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -153,6 +154,10 @@ main {
 
 body:not([data-view="board"]) main > * {
   max-width: 46rem;
+}
+
+body:not([data-view="board"]) .top {
+  padding-right: max(var(--edge), calc(100% - var(--left) - 46rem));
 }
 
 .flag {
@@ -223,7 +228,7 @@ body:not([data-view="board"]) main > * {
   position: absolute;
   top: 0;
   left: var(--gutter);
-  width: 2.5rem;
+  right: 0;
   border-top: 1px solid var(--rule);
 }
 
