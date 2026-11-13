@@ -17,14 +17,17 @@
 </nav>
 <span id="status" class="status" role="status" aria-live="polite"></span>
 <button id="ask" class="askbtn" type="button">Ask <kbd id="askkey">⌘K</kbd></button>
+<button id="notifyon" class="askbtn notifybtn" type="button" hidden>Turn on notifications</button>
 </header>
+<p id="announce" class="sr" role="status" aria-live="polite"></p>
 <main id="app"></main>
 <dialog id="chat" class="chat" aria-labelledby="chattitle">
 <div class="chathead">
 <h2 id="chattitle">Ask the assistant</h2>
 <button id="chatclose" class="textbtn quiet" type="button" aria-label="Close (Esc)">Esc</button>
 </div>
-<ol id="chatlines" class="chatlines" aria-live="polite"></ol>
+<ol id="chatlines" class="chatlines"></ol>
+<p id="chatsay" class="sr" role="status" aria-live="polite"></p>
 <p id="chatwait" class="note wait" role="status"></p>
 <form id="chatform" class="chatform">
 <textarea id="chattext" class="field" rows="3" placeholder="A new thing or a question" aria-label="Message to the assistant"></textarea>

@@ -10,8 +10,11 @@ const chatNote = document.getElementById("chatnote");
 const chatWait = document.getElementById("chatwait");
 const navList = document.getElementById("navlist");
 const navBoard = document.getElementById("navboard");
+const announcer = document.getElementById("announce");
+const chatSay = document.getElementById("chatsay");
+const notifyBtn = document.getElementById("notifyon");
 
-const state = { view: null, denied: false, back: "#/", drafts: {}, notes: {}, busy: {}, seen: null, chatKey: "" };
+const state = { view: null, denied: false, back: "#/", drafts: {}, notes: {}, busy: {}, seen: null, chatKey: "", viewKey: "", route: null, lastAssistant: null };
 
 function token() {
   const m = document.cookie.match(/(?:^|;\s*)deckhand_token=([^;]*)/);
@@ -84,7 +87,13 @@ function note(key) {
   return el("p", { class: n.error ? "note error" : "note", role: "status", text: n.text });
 }
 
+function announce(text) {
+  announcer.textContent = "";
+  if (text) setTimeout(() => { announcer.textContent = text; }, 50);
+}
+
 async function act(key, kind, body, okText) {
+  if (state.busy[key]) return "";
   state.busy[key] = true;
   delete state.notes[key];
   render();
@@ -92,6 +101,7 @@ async function act(key, kind, body, okText) {
   delete state.busy[key];
   if (err) state.notes[key] = { error: true, text: err, stamp: stamp(key) };
   else if (okText) state.notes[key] = { text: okText, stamp: stamp(key) };
+  announce(err || okText || "");
   render();
   return err;
 }
@@ -127,13 +137,13 @@ function answerForm(key, target, label, extra) {
   return el(
     "form",
     { class: "answer", onsubmit: (e) => { e.preventDefault(); sendAnswer(key, target); } },
-    el("div", { class: "fieldrow" }, input, el("button", { class: "button primary", type: "submit", "data-key": key + ":send", disabled: !!state.busy[key], text: "Send" }), extra),
+    el("div", { class: "fieldrow" }, input, el("button", { class: "button primary", type: "submit", "data-key": key + ":send", "aria-disabled": state.busy[key] ? "true" : null, text: "Send" }), extra),
     note(key),
   );
 }
 
 function button(text, key, onclick, cls) {
-  return el("button", { type: "button", class: cls || "textbtn", "data-key": key, disabled: !!state.busy[key], onclick, text });
+  return el("button", { type: "button", class: cls || "textbtn", "data-key": key, "aria-disabled": state.busy[key] ? "true" : null, onclick: () => { if (!state.busy[key]) onclick(); }, text });
 }
 
 function flag() {
@@ -154,14 +164,14 @@ function choices(t, key) {
     type: "button",
     class: "choice",
     "data-key": key + ":c" + (i + 1),
-    disabled: !!state.busy[key],
+    "aria-disabled": state.busy[key] ? "true" : null,
     onclick: () => act(key, "choice", { task: t.id, choice: i + 1, label: c }, "Sent."),
   }, el("span", { class: "num", text: String(i + 1) }), el("span", { class: "label", text: c })))));
 }
 
 function reply(t, key, screen) {
   if (!t.session) return null;
-  if ((t.menu || []).length) return el("div", { class: "answer" }, screen && t.screen ? el("pre", { class: "screen", text: t.screen }) : null, choices(t, key), note(key));
+  if ((t.menu || []).length) return el("div", { class: "answer" }, screen && t.screen ? el("pre", { class: "screen", tabindex: "0", role: "region", "aria-label": "Session screen", text: t.screen }) : null, choices(t, key), note(key));
   return answerForm(key, { task: t.id }, "Your answer");
 }
 
@@ -199,8 +209,12 @@ function needSession(s) {
   );
 }
 
+function pageHead(text) {
+  return el("h1", { class: "sr", text });
+}
+
 function needsBlock(items) {
-  if (!items.length) return el("p", { class: "calm", text: "Nothing needs you." });
+  if (!items.length) return el("h1", { class: "calm", text: "Nothing needs you." });
   return el(
     "section",
     { class: "needs", "aria-labelledby": "needshead" },
@@ -271,6 +285,7 @@ function card(t) {
 function boardPage(v) {
   const ts = v.tasks || [];
   return [
+    pageHead("Board"),
     el("div", { class: "board" }, stages.map(([stage, name, empty]) => {
       const cards = ts.filter((t) => t.stage === stage).map(card);
       return el(
@@ -297,7 +312,7 @@ function prioWords(p) {
 function taskPage(v, id) {
   const back = el("a", { class: "back", href: state.back, "data-key": "back", text: state.back === "#/board" ? "Board" : "All tasks" });
   const t = (v.tasks || []).find((x) => x.id === id);
-  if (!t) return [back, el("p", { class: "empty", text: "This task is not open. It may be done." })];
+  if (!t) return [back, pageHead("Task not open"), el("p", { class: "empty", text: "This task is not open. It may be done." })];
   const key = "t:" + t.id;
   const meta = [t.project_name, prioWords(t.prio), t.deadline && "due " + t.deadline, t.from && "from " + t.from].filter(Boolean).join(", ");
   const pr = !t.pr ? null : /^https:\/\//i.test(t.pr) ? el("a", { class: "code", href: t.pr, target: "_blank", rel: "noopener noreferrer", text: prNumber(t.pr) }) : el("span", { class: "code", text: t.pr });
@@ -341,9 +356,38 @@ function route() {
   return { board: location.hash === "#/board" };
 }
 
-function render() {
+function focusTarget(key) {
+  const exact = app.querySelector('[data-key="' + CSS.escape(key) + '"]');
+  if (exact) return exact;
+  const m = /^[ts]:(.*?)(?::(?:open|done|send|c\d+))?$/.exec(key);
+  if (m) {
+    const row = app.querySelector('[data-key="a:' + CSS.escape(m[1]) + '"], [data-key="b:' + CSS.escape(m[1]) + '"]');
+    if (row) return row;
+  }
+  return app.querySelector("h1, h2");
+}
+
+function focusNode(n, sel) {
+  if (!n) return;
+  if (!n.matches("a, button, input, textarea, [tabindex]")) n.setAttribute("tabindex", "-1");
+  n.focus({ preventScroll: true });
+  if (sel && n.setSelectionRange) n.setSelectionRange(sel[0], sel[1]);
+}
+
+function pageTitle() {
+  const r = route();
+  let name = "Tasks";
+  if (r.task) {
+    const t = state.view && (state.view.tasks || []).find((x) => x.id === r.task);
+    name = t ? t.title || t.id : "Task";
+  } else if (r.board) name = "Board";
+  const n = state.view && state.view.count;
+  document.title = n > 0 ? "(" + n + ") " + name : name;
+}
+
+function render(fromRoute) {
   const a = document.activeElement;
-  const key = a && app.contains(a) && a.dataset ? a.dataset.key : "";
+  const key = !fromRoute && a && app.contains(a) && a.dataset ? a.dataset.key : "";
   const sel = key && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
   const r = route();
   if (!r.task) state.back = r.board ? "#/board" : "#/";
@@ -353,25 +397,25 @@ function render() {
     else n.removeAttribute("aria-current");
   }
   let body;
-  if (state.denied) body = [el("p", { class: "empty", text: "This page needs its key. Open it from deckhand." })];
-  else if (!state.view) body = [el("p", { class: "empty", text: "Loading." })];
+  if (state.denied) body = [pageHead("Tasks"), el("p", { class: "empty", text: "This page needs its key. Open it from deckhand." })];
+  else if (!state.view) body = [pageHead("Tasks"), el("p", { class: "empty", text: "Loading." })];
   else body = r.task ? taskPage(state.view, r.task) : r.board ? boardPage(state.view) : listPage(state.view);
   app.replaceChildren(...body.filter(Boolean));
-  if (key) {
-    const n = app.querySelector('[data-key="' + CSS.escape(key) + '"]');
-    if (n) {
-      n.focus({ preventScroll: true });
-      if (sel && n.setSelectionRange) n.setSelectionRange(sel[0], sel[1]);
-    }
-  }
+  for (const s of app.querySelectorAll(".screen")) s.scrollTop = s.scrollHeight;
+  if (key) focusNode(focusTarget(key), sel);
+  pageTitle();
 }
 
 function renderChat() {
   const lines = (state.view && state.view.chat) || [];
   const k = JSON.stringify(lines);
   if (k === state.chatKey) return;
+  const last = lines[lines.length - 1];
+  chatWait.textContent = last && last.from === "you" ? "Waiting for the assistant" : "";
+  const heard = last && last.from !== "you" ? last.at + "|" + last.text : null;
+  if (state.chatKey !== "" && heard && heard !== state.lastAssistant) chatSay.textContent = "Assistant: " + last.text;
+  state.lastAssistant = heard;
   state.chatKey = k;
-  chatWait.textContent = lines.length && lines[lines.length - 1].from === "you" ? "Waiting for the assistant" : "";
   const atEnd = chatLines.scrollHeight - chatLines.scrollTop - chatLines.clientHeight < 40;
   chatLines.replaceChildren(
     ...(lines.length
@@ -405,12 +449,21 @@ function notify(v) {
 }
 
 function apply(v) {
+  const k = JSON.stringify([v.tasks, v.waiting]);
+  const changed = !state.view || state.denied || k !== state.viewKey;
+  state.viewKey = k;
   state.view = v;
   state.denied = false;
-  document.title = v.count > 0 ? "(" + v.count + ") Tasks" : "Tasks";
-  for (const [k, n] of Object.entries(state.notes)) if (n.stamp !== undefined && n.stamp !== stamp(k)) delete state.notes[k];
+  let cleared = false;
+  for (const [key, n] of Object.entries(state.notes)) {
+    if (n.stamp !== undefined && n.stamp !== stamp(key)) {
+      delete state.notes[key];
+      cleared = true;
+    }
+  }
   notify(v);
-  render();
+  if (changed || cleared) render();
+  pageTitle();
   renderChat();
 }
 
@@ -445,9 +498,17 @@ async function sendChat() {
 
 let events = null;
 
+function canNotify() {
+  return "Notification" in window;
+}
+
+function syncNotifyButton() {
+  notifyBtn.hidden = !(canNotify() && Notification.permission === "default");
+}
+
 function connect() {
   if (events) events.close();
-  events = new EventSource("/api/events");
+  events = new EventSource(canNotify() && Notification.permission === "granted" ? "/api/events?notify=1" : "/api/events");
   events.onopen = () => { statusLine.textContent = ""; };
   events.onmessage = (e) => {
     let v;
@@ -517,21 +578,33 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-document.addEventListener("click", () => {
-  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-}, { once: true });
+notifyBtn.addEventListener("click", async () => {
+  await Notification.requestPermission();
+  syncNotifyButton();
+  if (Notification.permission === "granted") connect();
+});
+syncNotifyButton();
 
 window.addEventListener("hashchange", () => {
   if (location.hash === "#new") {
     history.replaceState(null, "", location.pathname);
     openChat();
   }
-  render();
+  render(true);
   window.scrollTo(0, 0);
+  const prev = state.route;
+  state.route = route();
+  let target = null;
+  if (prev && prev.task && !state.route.task) {
+    const id = CSS.escape(prev.task);
+    target = app.querySelector('[data-key="a:' + id + '"], [data-key="b:' + id + '"]');
+  }
+  focusNode(target || app.querySelector("h1"));
 });
 
 const opening = location.hash === "#new";
 history.replaceState(null, "", location.pathname + (opening ? "" : location.hash));
 render();
+state.route = route();
 if (opening) openChat();
 start();

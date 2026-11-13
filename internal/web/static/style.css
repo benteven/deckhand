@@ -151,6 +151,16 @@ button {
   color: var(--link);
 }
 
+.notifybtn {
+  margin-left: 1rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.notifybtn[hidden] {
+  display: none;
+}
+
 kbd {
   font-family: var(--sans);
   font-size: 0.8125rem;
@@ -327,7 +337,7 @@ a.needtitle:hover {
   font-weight: 600;
 }
 
-.button.primary:hover:not(:disabled) {
+.button.primary:hover:not([aria-disabled="true"]) {
   background: var(--yellow-press);
 }
 
@@ -340,7 +350,7 @@ a.needtitle:hover {
   cursor: pointer;
 }
 
-.textbtn:hover:not(:disabled) {
+.textbtn:hover:not([aria-disabled="true"]) {
   text-decoration: underline;
   text-underline-offset: 0.2em;
 }
@@ -350,9 +360,9 @@ a.needtitle:hover {
   font-size: 0.8125rem;
 }
 
-.button:disabled,
-.textbtn:disabled,
-.choice:disabled {
+.button[aria-disabled="true"],
+.textbtn[aria-disabled="true"],
+.choice[aria-disabled="true"] {
   opacity: 0.55;
   cursor: default;
 }
@@ -380,6 +390,8 @@ a.needtitle:hover {
 }
 
 .calm {
+  font-size: inherit;
+  font-weight: 400;
   color: var(--muted);
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--rule);
@@ -534,7 +546,7 @@ a.needtitle:hover {
   padding-block: 0.3125rem;
 }
 
-.choice:hover:not(:disabled) {
+.choice:hover:not([aria-disabled="true"]) {
   border-color: var(--blue);
 }
 
