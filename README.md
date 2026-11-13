@@ -122,7 +122,7 @@ A session can start helper sessions with the `subsession` skill. Each subsession
 
 In the list, subsessions sit under their parent, indented with `↳`. When the parent is suspended, it shows in gray at its place with "suspended", and Enter resumes it. A subsession whose parent is gone shows "sub of" and the parent's name. In Suspended, a suspended subsession sits under its suspended parent. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
 
-When a subsession closes, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
+Suspending a parent with `s` suspends its running subsessions too, and the prompt says how many are working. They keep their worktrees and wait under the parent in Suspended. When a subsession closes while its parent runs, deckhand asks you what to do with its worktree. Only you can answer. "y" moves the worktree to the Trash and runs `git worktree prune`; the branch stays. A subsession cannot start subsessions: there is one level. Press `R` on a session that ran before the skill existed to give it the skill.
 
 ### Assistant
 
