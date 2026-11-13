@@ -63,11 +63,11 @@ From anywhere:
 | Key | Does |
 | --- | --- |
 | `ctrl-b` | Focus the list |
-| `ctrl-j` / `ctrl-k` | Next or previous session |
+| `ctrl-j` / `ctrl-k` | Next or previous session, without subsessions |
 | `ctrl-b 1` ... `ctrl-b 9` | Go to session 1 to 9 |
 | `ctrl-b <` / `ctrl-b >` | Narrower or wider list |
 | `ctrl-b ?` | Show all keys |
-| `ctrl-q` or `ctrl-b ctrl-b` | Like Cmd-Tab: go to the next session in the list, press again to go further; when you release ctrl, the pick moves to the top |
+| `ctrl-q` or `ctrl-b ctrl-b` | Like Cmd-Tab: go to the next session in the list (subsessions are skipped), press again to go further; when you release ctrl, the pick moves to the top |
 | `ctrl-shift-q` | The same, from the bottom of the list up |
 | `ctrl-\` | Next session in the same family: the parent, then its subsessions |
 | `ctrl-b ctrl-j`, `ctrl-b ctrl-k`, `ctrl-b ctrl-q`, `ctrl-b ctrl-\` | Send that key to Claude Code |

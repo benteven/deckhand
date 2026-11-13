@@ -838,6 +838,12 @@ func (m *model) switchLive(next bool) tea.Cmd {
 	default:
 		i = len(rows) - 1
 	}
+	for n := 0; rows[i].Parent != "" && n < len(rows); n++ {
+		i = (i + step + len(rows)) % len(rows)
+	}
+	if rows[i].Parent != "" {
+		return nil
+	}
 	return m.switchTo(rows[i])
 }
 

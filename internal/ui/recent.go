@@ -45,7 +45,7 @@ func (m *model) cycleOrder() []string {
 	}
 	order := []string{cur}
 	for _, r := range m.liveRows() {
-		if r.SessionID != cur {
+		if r.SessionID != cur && r.Parent == "" {
 			order = append(order, r.SessionID)
 		}
 	}
