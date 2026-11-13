@@ -697,7 +697,7 @@ func (m *model) askSummaries() tea.Cmd {
 }
 
 func (m *model) taskSummary(t tasks.Task, now time.Time) tea.Cmd {
-	summary := strings.TrimSpace(t.Summary)
+	summary := relayText(t.Summary)
 	if summary == "" || t.Project == "" {
 		return nil
 	}
@@ -709,6 +709,20 @@ func (m *model) taskSummary(t tasks.Task, now time.Time) tea.Cmd {
 		}
 		return nil
 	})
+}
+
+func relayText(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	for {
+		cut := text
+		for _, mark := range []string{"[deckhand]", viaMark, strings.TrimSpace(pageMark)} {
+			cut = strings.TrimSpace(strings.TrimPrefix(cut, mark))
+		}
+		if cut == text {
+			return text
+		}
+		text = cut
+	}
 }
 
 func appendNotes(path, entry string) error {
