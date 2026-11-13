@@ -1,10 +1,14 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,7 +128,33 @@ func openPage() error {
 	if err != nil {
 		return err
 	}
+	if err := checkPage(cfg.WebPort, token); err != nil {
+		return err
+	}
 	return exec.Command(paths.Opener(), web.URL(cfg.WebPort, token)).Run()
+}
+
+func checkPage(port int, token string) error {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	nonce := hex.EncodeToString(raw)
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/hello?nonce=%s", port, nonce))
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("nothing listens on 127.0.0.1:%d; start deckhand first", port)
+	}
+	other := fmt.Errorf("something else listens on 127.0.0.1:%d", port)
+	if err != nil {
+		return other
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+	if err != nil || resp.StatusCode != http.StatusOK || !hmac.Equal(body, []byte(web.Proof(token, nonce))) {
+		return other
+	}
+	return nil
 }
 
 func runPreview(args []string) {

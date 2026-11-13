@@ -1,7 +1,9 @@
 package web
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
@@ -86,6 +88,7 @@ func New(port int, token string, act func(Action)) *Server {
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(files)))
 	s.mux.HandleFunc("GET /api/view", s.getView)
 	s.mux.HandleFunc("GET /api/events", s.events)
+	s.mux.HandleFunc("GET /api/hello", s.hello)
 	for _, kind := range []string{"answer", "choice", "open", "chat", "done"} {
 		s.mux.HandleFunc("POST /api/"+kind, s.action(kind))
 	}
@@ -99,7 +102,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/") && !s.allowed(r) {
+	if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/hello" && !s.allowed(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -137,6 +140,23 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	w.Write(page)
+}
+
+func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
+	nonce := r.URL.Query().Get("nonce")
+	if nonce == "" || len(nonce) > 128 {
+		http.Error(w, "bad nonce", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write([]byte(Proof(s.token, nonce)))
+}
+
+func Proof(token, nonce string) string {
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte(nonce))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *Server) current() ([]byte, chan struct{}) {
