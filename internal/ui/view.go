@@ -80,6 +80,8 @@ func (m *model) View() tea.View {
 		content = m.del.view(w, h)
 	case m.restart != nil:
 		content = m.restart.view(w, h)
+	case m.assist != nil:
+		content = m.assist.view(w, h)
 	case m.handoff != nil:
 		content = m.handoff.view(w, h)
 	case m.help != nil:

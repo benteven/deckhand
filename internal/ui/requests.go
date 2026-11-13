@@ -101,8 +101,12 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		if account == "" {
 			account = m.state.Account
 		}
+		text := req.Text
+		if text != "" {
+			text = viaAssistant(text)
+		}
 		id := uuid.NewV4().String()
-		return forRequest(m.start(id, req.Folder, req.Name, account, req.Text), req.ID, id)
+		return forRequest(m.start(id, req.Folder, req.Name, account, text), req.ID, id)
 	case "resume", "send", "handoff", "close":
 	default:
 		return fail("unknown request %s", req.Op)
@@ -143,7 +147,7 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("%s is handing off; try again later", r.Name)
 	}
 	if req.Op == "send" {
-		return m.typeIn(r, "[via assistant] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
+		return m.typeIn(r, viaAssistant(req.Text), m.replyTyped(req.ID, r.Name, "sent"))
 	}
 	prompt, err := m.beginHandoff(r)
 	if err != nil {
@@ -233,5 +237,17 @@ func (m *model) searchRequest(req ctl.Request) tea.Cmd {
 			return errMsg{err}
 		}
 		return nil
+	}
+}
+
+const viaMark = "[via assistant]"
+
+func viaAssistant(text string) string {
+	for {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(text), viaMark)
+		if !ok {
+			return viaMark + " " + strings.TrimSpace(text)
+		}
+		text = rest
 	}
 }

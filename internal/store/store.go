@@ -29,6 +29,14 @@ func ClampListWidth(w int) int {
 }
 
 func SaveListWidth(dir string, w int) error {
+	return saveConfigKey(dir, "list_width", json.RawMessage(strconv.Itoa(w)))
+}
+
+func SaveAssistant(dir string, on bool) error {
+	return saveConfigKey(dir, "assistant", json.RawMessage(strconv.FormatBool(on)))
+}
+
+func saveConfigKey(dir, key string, value json.RawMessage) error {
 	path := filepath.Join(dir, "config.json")
 	raw := map[string]json.RawMessage{}
 	if err := readJSON(path, &raw); err != nil {
@@ -37,7 +45,7 @@ func SaveListWidth(dir string, w int) error {
 	if raw == nil {
 		raw = map[string]json.RawMessage{}
 	}
-	raw["list_width"] = json.RawMessage(strconv.Itoa(w))
+	raw[key] = value
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err

@@ -278,18 +278,20 @@ type model struct {
 	handoffs map[string]*pendingHandoff
 
 	agentMode bool
+	assist    *assistantDialog
 	agent     string
 	gone      map[string]bool
 	quitting  bool
 	inDialog  bool
 	requests  map[string]time.Time
 
-	assistantTry time.Time
-	updating     bool
-	restartDue   bool
-	notes        []string
-	reprompt     time.Time
-	typing       map[string]bool
+	assistantTry  time.Time
+	stopAssistant bool
+	updating      bool
+	restartDue    bool
+	notes         []string
+	reprompt      time.Time
+	typing        map[string]bool
 }
 
 func Run(version string) error {
@@ -535,6 +537,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.restart != nil {
 			return m, m.restartKey(msg)
 		}
+		if m.assist != nil {
+			return m, m.assistantKey(msg)
+		}
 		if m.handoff != nil {
 			return m, m.handoffKey(msg)
 		}
@@ -663,6 +668,9 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.toggleAgentMode()
+	case "G":
+		m.assist = &assistantDialog{on: !m.ops.Cfg.Assistant, dir: m.ops.AssistantDir}
+		return m.zoom(true)
 	case "c":
 		if r, ok := m.current(); ok {
 			return m.startHandoff(r)
@@ -717,7 +725,7 @@ func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) dialogOpen() bool {
-	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.handoff != nil || m.help != nil || m.accounts != nil
+	return m.cleanup != nil || m.prompt != nil || m.picker != nil || m.rename != nil || m.arts != nil || m.prPick != nil || m.takeover != nil || m.quit != nil || m.del != nil || m.restart != nil || m.assist != nil || m.handoff != nil || m.help != nil || m.accounts != nil
 }
 
 func (m *model) liveRows() []deck.Row {
@@ -1112,6 +1120,10 @@ func (m *model) started(msg startedMsg) tea.Cmd {
 		m.in.Panes = map[string]string{}
 	}
 	m.in.Panes[msg.id] = msg.pane
+	if msg.id == m.state.Assistant.ID && m.stopAssistant {
+		m.rebuild()
+		return tea.Batch(m.saveState(), m.stopLateAssistant(msg.id))
+	}
 	if msg.req != "" {
 		m.rebuild()
 		return tea.Batch(m.saveState(), m.answer(msg.req, ctl.Reply{Out: msg.out}))

@@ -4,18 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 	"uuid"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
+	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/typing"
 )
@@ -97,14 +101,15 @@ func (m *model) keepAssistant(now time.Time) tea.Cmd {
 		return tea.Batch(m.saveState(), func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, paths.ClaudeCommand(), "update")
+			name, args := updateCommand()
+			cmd := exec.CommandContext(ctx, name, args...)
 			cmd.WaitDelay = 5 * time.Second
 			out, err := cmd.CombinedOutput()
 			switch {
 			case ctx.Err() != nil:
-				return updatedMsg{fmt.Errorf("claude update did not finish in %v", updateTimeout)}
+				return updatedMsg{fmt.Errorf("%s did not finish in %v", name, updateTimeout)}
 			case err != nil:
-				return updatedMsg{fmt.Errorf("claude update: %v: %s", err, strings.TrimSpace(string(out)))}
+				return updatedMsg{fmt.Errorf("%s failed: %v: %s", name, err, strings.TrimSpace(string(out)))}
 			}
 			return updatedMsg{}
 		})
@@ -152,6 +157,19 @@ func (m *model) updated(msg updatedMsg) {
 func (m *model) freshAssistant(r deck.Row, file string) tea.Cmd {
 	prompt := fmt.Sprintf("%s Then read %s. It is your handoff note from before the restart. Continue from it.", assistantPrompt, file)
 	return m.relaunch(r, uuid.NewV4().String(), prompt)
+}
+
+func (m *model) stopLateAssistant(id string) tea.Cmd {
+	if !m.stopAssistant {
+		return nil
+	}
+	m.stopAssistant = false
+	m.state.Assistant.ID = id
+	r, ok := m.rowByID(id)
+	if !ok {
+		return nil
+	}
+	return m.pauseAssistant(r)
 }
 
 func (m *model) pauseAssistant(r deck.Row) tea.Cmd {
@@ -257,4 +275,90 @@ func (m *model) deliverNotes() tea.Cmd {
 		}
 		return nil
 	})
+}
+
+func updateCommand() (string, []string) {
+	claude := paths.ClaudeCommand()
+	if path, err := exec.LookPath(claude); err == nil {
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			if prefix, _, ok := strings.Cut(real, "/Caskroom/claude-code/"); ok {
+				brew := filepath.Join(prefix, "bin", "brew")
+				if _, err := os.Stat(brew); err != nil {
+					brew = "brew"
+				}
+				return brew, []string{"upgrade", "--cask", "claude-code"}
+			}
+		}
+	}
+	return claude, []string{"update"}
+}
+
+type assistantDialog struct {
+	on  bool
+	dir string
+}
+
+func (d *assistantDialog) view(w, h int) string {
+	title, text, hint := "Turn off the assistant? (y/n)", "Deckhand stops the assistant and gives no standing rules to sessions it starts. Its folder stays.", "y turn off  n cancel"
+	if d.on {
+		title = "Turn on the assistant? (y/n)"
+		text = "The assistant is a Claude session that deckhand keeps running. It can start, close and type into your other sessions, and it gets a note when a session waits for you. Menus always come to you. Edit its instructions in " + filepath.Join(d.dir, "instructions.md") + "."
+		hint = "y turn on  n cancel"
+	}
+	body := []string{normal.Render(ansi.Truncate(title, w, "…")), ""}
+	for _, l := range strings.Split(ansi.Wordwrap(text, w, ""), "\n") {
+		body = append(body, gray.Render(l))
+	}
+	return page(body, gray.Render(ansi.Truncate(hint, w, "")), h)
+}
+
+func (m *model) assistantKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "y":
+		on := m.assist.on
+		m.assist = nil
+		return tea.Sequence(m.zoom(false), m.setAssistant(on))
+	case "n", "esc":
+		m.assist = nil
+		return m.zoom(false)
+	}
+	return nil
+}
+
+func (m *model) setAssistant(on bool) tea.Cmd {
+	if on {
+		if err := ctl.WriteInstructions(m.ops.AssistantDir); err != nil {
+			m.err = err
+			return nil
+		}
+	}
+	if err := store.SaveAssistant(m.home, on); err != nil {
+		m.err = err
+		return nil
+	}
+	var stop tea.Cmd
+	m.ops.Cfg.Assistant = on
+	m.stopAssistant = false
+	if on {
+		m.state.Assistant.Paused = false
+		m.assistantTry = time.Time{}
+		m.ops.Rules, m.ops.AssistantID = ctl.Rules(), m.state.Assistant.ID
+		m.hint = "The assistant starts in a few seconds"
+	} else {
+		m.hint = "The assistant is off"
+		if r, ok := m.rowByID(m.state.Assistant.ID); ok {
+			switch {
+			case m.resuming[r.SessionID]:
+				m.stopAssistant = true
+			case r.Kind == deck.Live:
+				stop = m.pauseAssistant(r)
+			case r.Kind == deck.Elsewhere:
+				m.hint = "The assistant is off, but it still runs in another terminal"
+			}
+		}
+		m.ops.Rules, m.ops.AssistantID = "", ""
+		m.notes, m.reprompt = nil, time.Time{}
+	}
+	m.rebuild()
+	return tea.Batch(stop, m.saveState(), m.showSelected())
 }

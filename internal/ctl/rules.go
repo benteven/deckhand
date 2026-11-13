@@ -32,7 +32,7 @@ After each start, create a session-only cron with CronCreate that runs this roun
 4. Tell the user only what needs the user.
 
 ## Routing
-Send new work to the session that owns that area. If no session fits, start one in the right folder with a short name. Text you type into a session starts with "[via assistant]".
+Send new work to the session that owns that area. If no session fits, start one in the right folder with a short name. Deckhand marks the text you send with "[via assistant]"; do not add the mark yourself.
 
 ## Closing
 Close a session when its work is done, its PRs are merged and nothing waits on it. Hand off a session when its context is high. If you are not sure, ask the user.
