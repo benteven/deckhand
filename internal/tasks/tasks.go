@@ -56,6 +56,10 @@ func Save(home string, ts []Task) error {
 	return store.WriteJSON(home, "tasks.json", ts)
 }
 
+func (t Task) Open() bool {
+	return t.Status != "done"
+}
+
 func Group(t Task) int {
 	switch t.Status {
 	case "needs-you":

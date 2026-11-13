@@ -1857,7 +1857,7 @@ func (m *model) fetchPRs() tea.Cmd {
 		}
 	}
 	for _, t := range m.tasks {
-		if t.Status != "done" {
+		if t.Open() {
 			urls = append(urls, t.PR)
 		}
 	}

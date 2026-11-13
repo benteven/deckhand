@@ -98,7 +98,7 @@ func (m *model) pageTick() tea.Cmd {
 	}
 	panes := map[string]string{}
 	for _, t := range m.tasks {
-		if t.Status == "done" || t.Session == "" || !m.in.Events[t.Session].Menu() {
+		if !t.Open() || t.Session == "" || !m.in.Events[t.Session].Menu() {
 			continue
 		}
 		if r, ok := m.rowByID(t.Session); ok && r.Kind == deck.Live {
@@ -143,18 +143,18 @@ func (m *model) publishPage() {
 }
 
 func (m *model) pageView() web.View {
-	open := slices.DeleteFunc(slices.Clone(m.tasks), func(t tasks.Task) bool { return t.Status == "done" })
+	open := slices.DeleteFunc(slices.Clone(m.tasks), func(t tasks.Task) bool { return !t.Open() })
 	tasks.Sort(open)
 	v := web.View{Chat: m.chat, Waiting: m.waitingSessions()}
 	for _, t := range open {
-		tv := web.TaskView{Task: t, Stage: m.taskStage(t)}
+		tv := web.TaskView{Task: t, Group: tasks.Group(t), Stage: m.taskStage(t)}
 		if t.Project != "" {
 			tv.ProjectName = m.sessionName(t.Project)
 		}
 		if shot, ok := m.menus[t.Session]; ok && t.Session != "" && m.in.Events[t.Session].Menu() {
 			tv.Menu, tv.Screen = shot.choices, shot.screen
 		}
-		if tasks.Group(t) == 0 {
+		if t.Status == "needs-you" {
 			v.Count++
 		}
 		v.Tasks = append(v.Tasks, tv)
@@ -165,7 +165,7 @@ func (m *model) pageView() web.View {
 
 func (m *model) taskStage(t tasks.Task) string {
 	switch {
-	case t.Session == "" || t.Status == "done":
+	case t.Session == "" || !t.Open():
 		return ""
 	case t.PR != "" && m.prState(t.PR).state == "open":
 		return "review"
@@ -418,16 +418,16 @@ func (m *model) pageDone(a web.Action) tea.Cmd {
 		return replyTo(a, fmt.Errorf("no task %s", a.Task))
 	}
 	t := m.tasks[i]
-	if t.Status == "done" {
+	switch {
+	case !t.Open():
 		return replyTo(a, fmt.Errorf("task %s is done already", t.ID))
+	case t.Session != "" || m.taskStarts[t.ID]:
+		return replyTo(a, errors.New("this task has a session; finish it there"))
 	}
-	now := time.Now()
-	t.Status = "done"
-	t.Log(now, "done")
-	m.tasks[i] = t
+	done := m.finishTask(i, t.Summary)
 	m.publishPage()
 	replyTo(a, nil)
-	return tea.Batch(m.saveTasks(), m.taskSummary(t, now))
+	return done
 }
 
 func (m *model) pageChat(a web.Action) tea.Cmd {

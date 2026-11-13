@@ -99,33 +99,37 @@ func (m *model) taskRequest(req ctl.Request) tea.Cmd {
 			return fail("%s", err)
 		}
 		t := m.tasks[i]
-		out := "updated"
-		var told tea.Cmd
-		before := t.Status
 		if req.Op == "task-done" {
-			if t.Status == "done" {
+			if !t.Open() {
 				return fail("task %s is done already", t.ID)
 			}
-			t.Status, t.Summary, out = "done", req.Args["summary"], "done"
-			t.Log(now, "done")
-			told = m.taskSummary(t, now)
-		} else {
-			if _, ok := req.Args["project"]; ok && !assistant {
-				return fail("only the assistant can change the project")
-			}
-			changes, err := m.setTaskFields(&t, req.Args)
-			if err != nil {
-				return fail("%s", err)
-			}
-			t.Log(now, strings.Join(changes, ", "))
-			if before != "needs-you" && t.Status == "needs-you" && m.ops.Cfg.Assistant {
-				told = m.notifyNeed(t)
-			}
+			return tea.Batch(m.finishTask(i, req.Args["summary"]), m.answer(req.ID, ctl.Reply{Out: "done"}))
+		}
+		if _, ok := req.Args["project"]; ok && !assistant {
+			return fail("only the assistant can change the project")
+		}
+		before := t.Status
+		changes, err := m.setTaskFields(&t, req.Args)
+		if err != nil {
+			return fail("%s", err)
+		}
+		t.Log(now, strings.Join(changes, ", "))
+		var told tea.Cmd
+		if before != "needs-you" && t.Status == "needs-you" && m.ops.Cfg.Assistant {
+			told = m.notifyNeed(t)
 		}
 		m.tasks[i] = t
-		return tea.Batch(m.saveTasks(), m.answer(req.ID, ctl.Reply{Out: out}), told)
+		return tea.Batch(m.saveTasks(), m.answer(req.ID, ctl.Reply{Out: "updated"}), told)
 	}
 	return fail("unknown request %s", req.Op)
+}
+
+func (m *model) finishTask(i int, summary string) tea.Cmd {
+	now := time.Now()
+	t := &m.tasks[i]
+	t.Status, t.Summary = "done", summary
+	t.Log(now, "done")
+	return tea.Batch(m.saveTasks(), m.taskSummary(*t, now))
 }
 
 func (m *model) taskFor(req ctl.Request, assistant bool) (int, error) {
@@ -229,7 +233,7 @@ func (m *model) sessionName(id string) string {
 
 func (m *model) taskListOut(all bool, caller string) string {
 	open := slices.DeleteFunc(slices.Clone(m.tasks), func(t tasks.Task) bool {
-		return t.Status == "done" || (!all && t.Project != caller)
+		return !t.Open() || (!all && t.Project != caller)
 	})
 	tasks.Sort(open)
 	var lines []string
@@ -331,7 +335,7 @@ func (m *model) startTask(req ctl.Request) tea.Cmd {
 	switch {
 	case t.Project == "" || t.Project != req.Caller:
 		return fail("only the project of task %s can start it", t.ID)
-	case t.Status == "done":
+	case !t.Open():
 		return fail("task %s is done", t.ID)
 	case t.Session != "" || m.taskStarts[t.ID]:
 		return fail("task %s has a session already", t.ID)
@@ -383,7 +387,7 @@ func (m *model) taskCreated(msg taskCreatedMsg) tea.Cmd {
 	switch {
 	case i < 0:
 		return tea.Batch(dropWorktree(msg.repo, msg.name, msg.branch), m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("task %s is gone", req.Target)}))
-	case m.tasks[i].Status == "done":
+	case !m.tasks[i].Open():
 		return tea.Batch(dropWorktree(msg.repo, msg.name, msg.branch), m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf("task %s is done", req.Target)}))
 	}
 	m.tasks[i].Session = msg.id
@@ -430,7 +434,7 @@ func dropWorktree(repo, name, branch string) tea.Cmd {
 func (m *model) taskStartFailed(i int, id string) tea.Cmd {
 	t := &m.tasks[i]
 	t.Session, t.Repo, t.Branch, t.Dir = "", "", "", ""
-	if t.Status != "done" {
+	if t.Open() {
 		t.Status = "todo"
 	}
 	var drop tea.Cmd
@@ -576,7 +580,7 @@ func (m *model) roleTask(req ctl.Request) (tasks.Task, error) {
 	switch {
 	case t.Project == "" || t.Project != req.Caller:
 		return t, fmt.Errorf("only the project of task %s can start its roles", t.ID)
-	case t.Status == "done":
+	case !t.Open():
 		return t, fmt.Errorf("task %s is done", t.ID)
 	case t.Session == "" || t.Dir == "":
 		return t, fmt.Errorf("task %s has no session yet", t.ID)
@@ -659,7 +663,7 @@ func projectNotesText(path string) string {
 func (m *model) askSummaries() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, t := range m.tasks {
-		if t.Status == "done" || t.Session == "" || t.PR == "" || m.asking[t.ID] {
+		if !t.Open() || t.Session == "" || t.PR == "" || m.asking[t.ID] {
 			continue
 		}
 		if e := m.prs[t.PR]; e == nil || e.state != "merged" || !t.SummaryAsked.IsZero() {
@@ -765,7 +769,7 @@ func (m *model) deliverProjectNotes() tea.Cmd {
 func (m *model) closeDoneTasks(now time.Time) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, t := range m.tasks {
-		if t.Status != "done" || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) || !t.CleanupAsked.IsZero() || now.Before(m.closeRetry[t.Session]) {
+		if t.Open() || t.Session == "" || m.closing[t.Session] || !m.ownsWorktree(t.Session) || !t.CleanupAsked.IsZero() || now.Before(m.closeRetry[t.Session]) {
 			continue
 		}
 		if m.cleanup != nil && m.cleanup.sub.ID == t.Session {
@@ -914,7 +918,7 @@ func (m *model) projectIdle(r deck.Row) bool {
 	if m.resuming[id] || r.Busy || r.Asking || !m.userAway(r) || m.typing[r.PaneID] || m.handoffs[r.PaneID] != nil || len(m.projectNotes[id]) > 0 {
 		return false
 	}
-	if slices.ContainsFunc(m.tasks, func(t tasks.Task) bool { return t.Project == id && slices.Contains(taskStatuses, t.Status) }) {
+	if slices.ContainsFunc(m.tasks, func(t tasks.Task) bool { return t.Project == id && t.Open() }) {
 		return false
 	}
 	return !slices.ContainsFunc(m.state.Subs, func(s store.Subsession) bool { return s.Parent == id && m.running(s.ID) })

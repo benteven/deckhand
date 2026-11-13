@@ -121,7 +121,7 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 }
 
 func (m *model) queueCleanup(id string) tea.Cmd {
-	if i, ok := m.taskOf(id); ok && m.tasks[i].Status == "done" && m.merged(m.tasks[i]) {
+	if i, ok := m.taskOf(id); ok && !m.tasks[i].Open() && m.merged(m.tasks[i]) {
 		return nil
 	}
 	return m.askCleanup(id)

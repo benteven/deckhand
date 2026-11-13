@@ -690,7 +690,7 @@ func (m *model) worktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 	})
 	var reset tea.Cmd
 	for i := range m.tasks {
-		if t := &m.tasks[i]; dir != "" && t.Dir == dir && t.Status != "done" {
+		if t := &m.tasks[i]; dir != "" && t.Dir == dir && t.Open() {
 			t.Session, t.Repo, t.Branch, t.Dir, t.Status, t.Need = "", "", "", "", "todo", ""
 			t.Log(time.Now(), "worktree removed")
 			reset = m.saveTasks()
