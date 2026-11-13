@@ -30,6 +30,7 @@ const (
 	chatFile    = "chat.json"
 	chatLines   = 200
 	pageMark    = "[from the page] "
+	answerWait  = 10 * time.Minute
 )
 
 var errAnswerMenu = errors.New("answer the menu")
@@ -50,7 +51,10 @@ type pageShotMsg struct {
 	menus map[string]menuShot
 }
 
-type pageAnswer struct{ id, text string }
+type pageAnswer struct {
+	id, text string
+	at       time.Time
+}
 
 func (m *model) startWeb() tea.Cmd {
 	if m.web != nil || m.send == nil {
@@ -270,7 +274,7 @@ func (m *model) pageAnswer(a web.Action) tea.Cmd {
 		return replyTo(a, errors.New("the session is not running"))
 	}
 	if !m.typeReady(r) {
-		m.pageAnswers = append(m.pageAnswers, pageAnswer{id: id, text: a.Text})
+		m.pageAnswers = append(m.pageAnswers, pageAnswer{id: id, text: a.Text, at: time.Now()})
 		return replyTo(a, nil)
 	}
 	return m.typeIn(r, a.Text, func(err error) tea.Cmd {
@@ -291,6 +295,10 @@ func (m *model) deliverAnswers() tea.Cmd {
 		r, ok := m.rowByID(p.id)
 		if !ok || r.Kind != deck.Live {
 			m.err = fmt.Errorf("%s stopped before the page answer was typed", m.sessionName(p.id))
+			continue
+		}
+		if time.Since(p.at) >= answerWait {
+			m.err = fmt.Errorf("the page answer for %s was dropped; the session stayed busy", r.Name)
 			continue
 		}
 		if !m.typeReady(r) {
