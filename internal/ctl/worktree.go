@@ -153,6 +153,10 @@ func Prune(repo string) error {
 	return err
 }
 
+func Head(repo, branch string) (string, error) {
+	return git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+}
+
 func DeleteBranch(repo, branch string) error {
 	_, err := git(repo, "branch", "-D", branch)
 	return err

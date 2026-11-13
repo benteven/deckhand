@@ -46,15 +46,16 @@ func State(url string) (state, checks string, err error) {
 }
 
 type PR struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	Title  string `json:"title"`
-	Base   string `json:"baseRefName"`
-	Head   string `json:"headRefName"`
-	Fork   bool   `json:"isCrossRepository"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	Title   string `json:"title"`
+	Base    string `json:"baseRefName"`
+	Head    string `json:"headRefName"`
+	HeadOid string `json:"headRefOid"`
+	Fork    bool   `json:"isCrossRepository"`
 }
 
-const prFields = "number,url,title,baseRefName,headRefName,isCrossRepository"
+const prFields = "number,url,title,baseRefName,headRefName,headRefOid,isCrossRepository"
 
 func Info(url string) (PR, error) {
 	if !strings.HasPrefix(url, "https://") {

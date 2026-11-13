@@ -770,7 +770,8 @@ func (m *model) closeTask(t tasks.Task) tea.Cmd {
 		}
 		if merged = merged && !noGH; merged {
 			info, err := gh.Info(pr)
-			merged = err == nil && info.Head == branch
+			head, herr := ctl.Head(sub.Repo, branch)
+			merged = err == nil && herr == nil && info.Head == branch && info.HeadOid == head
 		}
 		if !merged {
 			msg.ask = true
