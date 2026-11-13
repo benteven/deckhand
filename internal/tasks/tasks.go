@@ -1,13 +1,12 @@
 package tasks
 
 import (
-	"encoding/json"
-	"errors"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/benteven/deckhand/internal/store"
 )
 
 const historyLimit = 30
@@ -43,15 +42,8 @@ type Task struct {
 }
 
 func Load(home string) ([]Task, error) {
-	data, err := os.ReadFile(filepath.Join(home, "tasks.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	var ts []Task
-	if err := json.Unmarshal(data, &ts); err != nil {
+	if err := store.ReadJSON(filepath.Join(home, "tasks.json"), &ts); err != nil {
 		return nil, err
 	}
 	return ts, nil
@@ -61,26 +53,7 @@ func Save(home string, ts []Task) error {
 	if ts == nil {
 		ts = []Task{}
 	}
-	data, err := json.MarshalIndent(ts, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(home, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(home, ".tasks.json-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(home, "tasks.json"))
+	return store.WriteJSON(home, "tasks.json", ts)
 }
 
 func Group(t Task) int {
