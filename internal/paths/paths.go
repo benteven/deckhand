@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -60,6 +61,16 @@ func ClaudeCommand() string {
 		return v
 	}
 	return "claude"
+}
+
+func Opener() string {
+	if v := os.Getenv("DECKHAND_OPEN"); v != "" {
+		return v
+	}
+	if runtime.GOOS == "darwin" {
+		return "open"
+	}
+	return "xdg-open"
 }
 
 func userHome() string {

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -125,11 +124,7 @@ func openPage() error {
 	if err != nil {
 		return err
 	}
-	opener := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		opener = "open"
-	}
-	return exec.Command(opener, web.URL(cfg.WebPort, token)).Run()
+	return exec.Command(paths.Opener(), web.URL(cfg.WebPort, token)).Run()
 }
 
 func runPreview(args []string) {

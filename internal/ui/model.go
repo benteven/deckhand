@@ -899,10 +899,7 @@ func (m *model) openPRs(r deck.Row) tea.Cmd {
 }
 
 func openURLs(urls []string) tea.Cmd {
-	opener := os.Getenv("DECKHAND_OPEN")
-	if opener == "" {
-		opener = defaultOpener()
-	}
+	opener := paths.Opener()
 	return func() tea.Msg {
 		for _, u := range urls {
 			if out, err := exec.Command(opener, u).CombinedOutput(); err != nil {
