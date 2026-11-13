@@ -297,14 +297,8 @@ func (m *model) deliverAnswers() tea.Cmd {
 			m.pageAnswers = append(m.pageAnswers, p)
 			continue
 		}
-		cmds = append(cmds, m.typeIn(r, p.text, func(err error) tea.Cmd {
-			switch {
-			case errors.Is(err, typing.ErrMenu):
-				m.pageAnswers = append(m.pageAnswers, p)
-			case err != nil:
-				m.err = typeError(r.Name, err)
-			}
-			return nil
+		cmds = append(cmds, m.typeOrHold(r, p.text, func() {
+			m.pageAnswers = append([]pageAnswer{p}, m.pageAnswers...)
 		}))
 	}
 	return tea.Batch(cmds...)
@@ -452,14 +446,8 @@ func (m *model) deliverChats() tea.Cmd {
 	for i, text := range held {
 		lines[i] = pageMark + text
 	}
-	return m.typeIn(r, strings.Join(lines, "\n"), func(err error) tea.Cmd {
-		switch {
-		case errors.Is(err, typing.ErrMenu):
-			m.pageChats = append(held, m.pageChats...)
-		case err != nil:
-			m.err = typeError(r.Name, err)
-		}
-		return nil
+	return m.typeOrHold(r, strings.Join(lines, "\n"), func() {
+		m.pageChats = append(held, m.pageChats...)
 	})
 }
 

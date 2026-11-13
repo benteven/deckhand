@@ -755,14 +755,8 @@ func (m *model) deliverProjectNotes() tea.Cmd {
 			continue
 		}
 		delete(m.projectNotes, id)
-		cmds = append(cmds, m.typeIn(r, strings.Join(notes, "\n"), func(err error) tea.Cmd {
-			switch {
-			case errors.Is(err, typing.ErrMenu):
-				m.projectNotes[id] = append(notes, m.projectNotes[id]...)
-			case err != nil:
-				m.err = typeError(r.Name, err)
-			}
-			return nil
+		cmds = append(cmds, m.typeOrHold(r, strings.Join(notes, "\n"), func() {
+			m.projectNotes[id] = append(notes, m.projectNotes[id]...)
 		}))
 	}
 	return tea.Batch(cmds...)

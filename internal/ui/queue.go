@@ -13,7 +13,6 @@ import (
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/roles"
-	"github.com/benteven/deckhand/internal/typing"
 )
 
 const queueGrace = 3 * time.Second
@@ -174,16 +173,10 @@ func (m *model) deliverTurns() tea.Cmd {
 			continue
 		}
 		delete(m.turns, id)
-		cmds = append(cmds, m.typeIn(r, "[deckhand] your turn in queue "+name, func(err error) tea.Cmd {
-			switch {
-			case errors.Is(err, typing.ErrMenu):
-				if q := m.state.Queues[name]; len(q) > 0 && q[0] == id {
-					m.turns[id] = name
-				}
-			case err != nil:
-				m.err = typeError(r.Name, err)
+		cmds = append(cmds, m.typeOrHold(r, "[deckhand] your turn in queue "+name, func() {
+			if q := m.state.Queues[name]; len(q) > 0 && q[0] == id {
+				m.turns[id] = name
 			}
-			return nil
 		}))
 	}
 	return tea.Batch(cmds...)
