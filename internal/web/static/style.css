@@ -119,6 +119,16 @@ button {
   border-bottom-color: var(--blue);
 }
 
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .status {
   color: var(--muted);
   font-size: 0.8125rem;
@@ -182,6 +192,7 @@ body:not([data-view="board"]) .top {
   width: 0.5rem;
   height: 0.5rem;
   background: var(--red);
+  border: 1px solid color-mix(in srgb, var(--ink) 60%, transparent);
 }
 
 .prio.high {

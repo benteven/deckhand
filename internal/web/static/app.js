@@ -47,19 +47,12 @@ function el(tag, props, ...kids) {
   return n;
 }
 
-function group(t) {
-  if (t.status === "needs-you") return 0;
-  if (t.status === "todo") return 1;
-  if (t.status === "waiting") return 3;
-  return 2;
-}
-
 function plain(t) {
   return !t.project && !t.session;
 }
 
 function line(t) {
-  if (t.need) return t.need;
+  if (t.need && t.status === "needs-you") return t.need;
   if (t.status === "waiting") return t.waits_on ? "Waits on " + t.waits_on : "Waiting";
   if (t.status === "needs-you") return "Needs you";
   if (t.status === "todo") return t.project ? "Not started" : "To do";
@@ -97,7 +90,7 @@ async function act(key, kind, body, okText) {
   render();
   const err = await post(kind, body);
   delete state.busy[key];
-  if (err) state.notes[key] = { error: true, text: err };
+  if (err) state.notes[key] = { error: true, text: err, stamp: stamp(key) };
   else if (okText) state.notes[key] = { text: okText, stamp: stamp(key) };
   render();
   return err;
@@ -162,7 +155,7 @@ function choices(t, key) {
     class: "choice",
     "data-key": key + ":c" + (i + 1),
     disabled: !!state.busy[key],
-    onclick: () => act(key, "choice", { task: t.id, choice: i + 1 }, "Sent."),
+    onclick: () => act(key, "choice", { task: t.id, choice: i + 1, label: c }, "Sent."),
   }, el("span", { class: "num", text: String(i + 1) }), el("span", { class: "label", text: c })))));
 }
 
@@ -245,10 +238,10 @@ function section(name, rows, empty) {
 function listPage(v) {
   const ts = v.tasks || [];
   return [
-    needsBlock([...ts.filter((t) => group(t) === 0).map(needTask), ...(v.waiting || []).map(needSession)]),
-    section("To do", ts.filter((t) => group(t) === 1).map(quietRow), "Nothing to do."),
-    section("Working", ts.filter((t) => group(t) === 2).map(quietRow), "Nothing is in work."),
-    section("Waiting on others", ts.filter((t) => group(t) === 3).map(quietRow), "Nothing waits on others."),
+    needsBlock([...ts.filter((t) => t.group === 0).map(needTask), ...(v.waiting || []).map(needSession)]),
+    section("To do", ts.filter((t) => t.group === 1).map(quietRow), "Nothing to do."),
+    section("Working", ts.filter((t) => t.group === 2).map(quietRow), "Nothing is in work."),
+    section("Waiting on others", ts.filter((t) => t.group === 3).map(quietRow), "Nothing waits on others."),
   ];
 }
 
@@ -264,6 +257,7 @@ function card(t) {
     "li",
     { class: "card" + (asks ? " asks" : "") },
     asks ? flag() : null,
+    asks ? el("span", { class: "sr", text: "Needs you" }) : null,
     el(
       "div",
       { class: "cardbody" },
@@ -337,7 +331,13 @@ function taskPage(v, id) {
 
 function route() {
   const m = /^#\/task\/(.+)$/.exec(location.hash);
-  if (m) return { task: decodeURIComponent(m[1]) };
+  if (m) {
+    try {
+      return { task: decodeURIComponent(m[1]) };
+    } catch {
+      return { task: "" };
+    }
+  }
   return { board: location.hash === "#/board" };
 }
 
@@ -383,7 +383,7 @@ function renderChat() {
 
 function needKeys(v) {
   const out = new Map();
-  for (const t of v.tasks || []) if (group(t) === 0) out.set("t:" + t.id, { title: t.title || t.id, body: line(t), hash: "#/task/" + encodeURIComponent(t.id) });
+  for (const t of v.tasks || []) if (t.group === 0) out.set("t:" + t.id, { title: t.title || t.id, body: line(t), hash: "#/task/" + encodeURIComponent(t.id) });
   for (const s of v.waiting || []) out.set("s:" + s.id, { title: s.name || s.id, body: s.need, hash: "#/" });
   return out;
 }
@@ -450,9 +450,14 @@ function connect() {
   events = new EventSource("/api/events");
   events.onopen = () => { statusLine.textContent = ""; };
   events.onmessage = (e) => {
+    let v;
     try {
-      apply(JSON.parse(e.data));
-    } catch {}
+      v = JSON.parse(e.data);
+    } catch {
+      statusLine.textContent = "Could not read an update.";
+      return;
+    }
+    apply(v);
   };
   events.onerror = () => {
     statusLine.textContent = "Offline. Trying again.";
@@ -481,12 +486,26 @@ async function start() {
 document.getElementById("askkey").textContent = isMac ? "⌘K" : "Ctrl K";
 document.getElementById("ask").addEventListener("click", openChat);
 document.getElementById("chatclose").addEventListener("click", () => chat.close());
-chat.addEventListener("click", (e) => { if (e.target === chat) chat.close(); });
+let downOnBackdrop = false;
+chat.addEventListener("pointerdown", (e) => { downOnBackdrop = e.target === chat; });
+chat.addEventListener("click", (e) => {
+  if (e.target === chat && downOnBackdrop) chat.close();
+  downOnBackdrop = false;
+});
 document.getElementById("chatform").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
 chatText.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     sendChat();
+  }
+});
+chatText.addEventListener("paste", (e) => {
+  const d = e.clipboardData;
+  if (!d || d.getData("text")) return;
+  if ([...d.items].some((i) => i.kind === "file" && i.type.startsWith("image/"))) {
+    e.preventDefault();
+    chatNote.className = "note";
+    chatNote.textContent = "Images are not supported yet.";
   }
 });
 chatText.addEventListener("input", () => { if (chatNote.classList.contains("error")) chatNote.textContent = ""; });
