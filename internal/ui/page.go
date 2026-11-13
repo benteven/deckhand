@@ -195,11 +195,7 @@ func (m *model) waitingSessions() []web.SessionView {
 		if !waits(ev) {
 			continue
 		}
-		need := strings.Join(strings.Fields(ev.Message), " ")
-		if need == "" {
-			need = "its turn ended"
-		}
-		out = append(out, web.SessionView{ID: id, Name: r.Name, Need: need})
+		out = append(out, web.SessionView{ID: id, Name: r.Name, Need: m.waitText(r, ev)})
 	}
 	return out
 }

@@ -217,6 +217,72 @@ func (m *model) assistantDied(pane string) tea.Cmd {
 	}
 }
 
+const (
+	idleMessage    = "Claude is waiting for your input"
+	waitTextRunes  = 300
+	waitTailBlocks = 40
+)
+
+type replyCache struct {
+	size int64
+	mod  time.Time
+	text string
+}
+
+func (m *model) waitText(r deck.Row, ev events.State) string {
+	text := strings.Join(strings.Fields(ev.Message), " ")
+	if text != "" && text != idleMessage {
+		return text
+	}
+	if reply := m.lastReply(r.TranscriptPath); reply != "" {
+		return reply
+	}
+	if text == "" {
+		return "its turn ended"
+	}
+	return text
+}
+
+func (m *model) lastReply(path string) string {
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if c, ok := m.replies[path]; ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) {
+		return c.text
+	}
+	entries, _ := transcript.Tail(path, waitTailBlocks)
+	text := ""
+	for i := len(entries) - 1; i >= 0 && entries[i].Kind != transcript.Prompt; i-- {
+		if entries[i].Kind == transcript.Reply {
+			text = lastParagraph(entries[i].Text)
+			break
+		}
+	}
+	if m.replies == nil {
+		m.replies = map[string]replyCache{}
+	}
+	m.replies[path] = replyCache{size: info.Size(), mod: info.ModTime(), text: text}
+	return text
+}
+
+func lastParagraph(text string) string {
+	paras := strings.Split(strings.TrimSpace(text), "\n\n")
+	p := strings.NewReplacer("**", "", "`", "").Replace(paras[len(paras)-1])
+	p = strings.Join(strings.Fields(strings.TrimLeft(p, "# ")), " ")
+	if r := []rune(p); len(r) > waitTextRunes {
+		p = string(r[len(r)-waitTextRunes:])
+		if i := strings.IndexByte(p, ' '); i >= 0 {
+			p = p[i+1:]
+		}
+		p = "…" + p
+	}
+	return p
+}
+
 func waits(ev events.State) bool {
 	return ev.Event == "Notification" || (ev.Event == "Stop" && !ev.PromptAt.IsZero())
 }
@@ -238,10 +304,7 @@ func (m *model) waitNotes(prev, next map[string]events.State) tea.Cmd {
 		if !ok || r.Kind != deck.Live || m.userIn(r) {
 			continue
 		}
-		text := strings.Join(strings.Fields(ev.Message), " ")
-		if text == "" {
-			text = "its turn ended"
-		}
+		text := m.waitText(r, ev)
 		note := fmt.Sprintf("[deckhand] %s (%s) waits for the user: %s", r.Name, id, text)
 		if task {
 			note = fmt.Sprintf("[deckhand] task %s \"%s\" waits for the user: %s", m.tasks[i].ID, m.tasks[i].Title, text)
@@ -279,10 +342,7 @@ func (m *model) followTaskWaits(prev, next map[string]events.State) tea.Cmd {
 		if !ok || r.Kind != deck.Live {
 			continue
 		}
-		text := strings.Join(strings.Fields(ev.Message), " ")
-		if text == "" {
-			text = "its turn ended"
-		}
+		text := m.waitText(r, ev)
 		t.Status, t.Need = "needs-you", text
 		t.Log(now, "needs you: "+text)
 		changed = true
