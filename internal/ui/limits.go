@@ -9,6 +9,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/usage"
 )
 
 func limitFresh(r deck.Row) bool {
@@ -30,20 +31,24 @@ func chooseAccount(name string, loggedIn []string, limits map[string]time.Time, 
 }
 
 func (m *model) limitedUntil(account string, now time.Time) (time.Time, bool) {
-	t, ok := m.state.Limits[account]
-	return t, ok && t.After(now)
+	t := m.state.Limits[account]
+	if u, ok := m.usage[account].LimitedUntil(now); ok && u.After(t) {
+		t = u
+	}
+	return t, t.After(now)
 }
 
 func (m *model) freeAccount(skip string, now time.Time) (string, bool) {
+	var names []string
 	for _, name := range append([]string{m.state.Account}, m.loggedIn()...) {
-		if name == skip || !slices.Contains(m.loggedIn(), name) {
-			continue
-		}
-		if _, limited := m.limitedUntil(name, now); !limited {
-			return name, true
+		if name != skip && slices.Contains(m.loggedIn(), name) {
+			names = append(names, name)
 		}
 	}
-	return "", false
+	return usage.Pick(names, m.usage, func(name string) bool {
+		_, limited := m.limitedUntil(name, now)
+		return limited
+	}, now)
 }
 
 func (m *model) setAccount(id, name string) {

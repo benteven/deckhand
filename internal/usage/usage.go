@@ -2,11 +2,13 @@ package usage
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -130,4 +132,20 @@ func userCommand(settings string) string {
 
 func Setting(command, settings string) any {
 	return statusLine{Type: "command", Command: command, Padding: readStatusLine(settings).Padding}
+}
+
+func Pick(names []string, use map[string]Usage, limited func(string) bool, now time.Time) (string, bool) {
+	var free []string
+	for _, n := range names {
+		if !limited(n) && use[n].FiveUsed(now) < 95 && !slices.Contains(free, n) {
+			free = append(free, n)
+		}
+	}
+	slices.SortStableFunc(free, func(a, b string) int {
+		return cmp.Or(cmp.Compare(use[a].FiveUsed(now), use[b].FiveUsed(now)), cmp.Compare(use[a].WeekUsed(now), use[b].WeekUsed(now)))
+	})
+	if len(free) == 0 {
+		return "", false
+	}
+	return free[0], true
 }
