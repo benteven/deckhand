@@ -16,7 +16,6 @@ type Role struct {
 	Model       string
 	Queue       string
 	Body        string
-	Path        string
 }
 
 type frontmatter struct {
@@ -57,7 +56,6 @@ func parse(path string, needMark bool) (Role, error) {
 		Model:       fm.Model,
 		Queue:       fm.Queue,
 		Body:        strings.TrimSpace(body),
-		Path:        path,
 	}, nil
 }
 
@@ -91,7 +89,8 @@ func List(home, repo string) []Role {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.md"))
 		for _, f := range files {
 			if r, err := parse(f, needMark); err == nil {
-				byName[strings.TrimSuffix(filepath.Base(f), ".md")] = r
+				r.Name = strings.TrimSuffix(filepath.Base(f), ".md")
+				byName[r.Name] = r
 			}
 		}
 	}

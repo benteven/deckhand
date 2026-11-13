@@ -94,6 +94,7 @@ func New(port int, token string, act func(Action)) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Host != fmt.Sprintf("127.0.0.1:%d", s.port) && r.Host != fmt.Sprintf("localhost:%d", s.port) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return

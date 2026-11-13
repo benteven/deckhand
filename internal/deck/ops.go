@@ -82,7 +82,7 @@ func (o Ops) Start(l Launch) (string, error) {
 	if l.Name != "" {
 		args = append(args, "--name", l.Name)
 	}
-	if l.Model != "" {
+	if l.Model != "" && l.Model != "inherit" {
 		args = append(args, "--model", l.Model)
 	}
 	args = append(args, "--settings", o.HooksPath)
