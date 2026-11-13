@@ -165,7 +165,7 @@ func (m *model) setTaskFields(t *tasks.Task, args map[string]string) ([]string, 
 			if strings.TrimSpace(v) == "" {
 				return nil, errors.New("the title cannot be empty")
 			}
-			t.Title = v
+			t.Title = strings.Join(strings.Fields(v), " ")
 		case "prio":
 			if !slices.Contains(taskPrios, v) {
 				return nil, fmt.Errorf("prio is one of %s", strings.Join(taskPrios, ", "))
@@ -701,12 +701,12 @@ func (m *model) askSummaries() tea.Cmd {
 }
 
 func (m *model) taskSummary(t tasks.Task, now time.Time) tea.Cmd {
-	summary := relayText(t.Summary)
+	summary, title := relayText(t.Summary), relayText(t.Title)
 	if summary == "" || t.Project == "" {
 		return nil
 	}
-	m.tellProject(t.Project, fmt.Sprintf("[deckhand] task %s \"%s\" is done: %s", t.ID, t.Title, summary))
-	path, entry := m.notesPath(t.Project), fmt.Sprintf("## %s %s\n%s\n", now.Format(time.DateOnly), t.Title, summary)
+	m.tellProject(t.Project, fmt.Sprintf("[deckhand] task %s \"%s\" is done: %s", t.ID, title, summary))
+	path, entry := m.notesPath(t.Project), fmt.Sprintf("## %s %s\n%s\n", now.Format(time.DateOnly), title, summary)
 	return tea.Batch(m.deliverProjectNotes(), func() tea.Msg {
 		if err := appendNotes(path, entry); err != nil {
 			return errMsg{err}

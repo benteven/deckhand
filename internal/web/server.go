@@ -61,9 +61,9 @@ type ChatLine struct {
 }
 
 type Action struct {
-	Kind, Task, Session, Text, Label string
-	Choice                           int
-	Reply                            chan error
+	Kind, Task, Session, Text, Label, Screen string
+	Choice                                   int
+	Reply                                    chan error
 }
 
 type Server struct {
@@ -207,6 +207,7 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			Session string `json:"session"`
 			Text    string `json:"text"`
 			Label   string `json:"label"`
+			Screen  string `json:"screen"`
 			Choice  int    `json:"choice"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
@@ -214,7 +215,7 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			return
 		}
 		reply := make(chan error, 1)
-		s.act(Action{Kind: kind, Task: body.Task, Session: body.Session, Text: body.Text, Label: body.Label, Choice: body.Choice, Reply: reply})
+		s.act(Action{Kind: kind, Task: body.Task, Session: body.Session, Text: body.Text, Label: body.Label, Screen: body.Screen, Choice: body.Choice, Reply: reply})
 		select {
 		case err := <-reply:
 			if err != nil {

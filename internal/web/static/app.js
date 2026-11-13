@@ -72,7 +72,7 @@ function when(at) {
 function stamp(key) {
   const v = state.view;
   if (!v) return "";
-  const id = key.slice(2);
+  const id = key.split(":")[1];
   if (key.startsWith("s:")) {
     const s = (v.waiting || []).find((x) => x.id === id);
     return s ? s.need : "";
@@ -165,7 +165,7 @@ function choices(t, key) {
     class: "choice",
     "data-key": key + ":c" + (i + 1),
     "aria-disabled": state.busy[key] ? "true" : null,
-    onclick: () => act(key, "choice", { task: t.id, choice: i + 1, label: c }, "Sent."),
+    onclick: () => act(key, "choice", { task: t.id, choice: i + 1, label: c, screen: t.screen || "" }, "Sent."),
   }, el("span", { class: "num", text: String(i + 1) }), el("span", { class: "label", text: c })))));
 }
 
