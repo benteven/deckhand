@@ -17,7 +17,7 @@ The deckhand binary is ` + exe + `.
 
 1. Run ` + "`ListAgents`" + ` and copy your own address from "This session is X [id]".
 2. Commit first if the subsession needs your uncommitted changes.
-3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" -- "<task>"` + "`" + `. It prints the subsession's name and worktree.
+3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" [--model fable|opus|sonnet] -- "<task>"` + "`" + `. It prints the subsession's name and worktree. Without ` + "`--model`" + ` it runs on the Claude Code default.
 4. Talk to it with ` + "`SendMessage`" + ` to that name. It reports back to you the same way.
 5. List: ` + "`" + exe + " sub list`" + `. Close: ` + "`" + exe + " sub close <name>`" + `. Closing asks the user about the worktree; do not remove it yourself.
 6. A subsession cannot start subsessions.
