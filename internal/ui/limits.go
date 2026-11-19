@@ -16,6 +16,19 @@ func limitFresh(r deck.Row) bool {
 	return r.Kind == deck.Live && !l.At.IsZero() && !r.Started.IsZero() && l.At.After(r.Started)
 }
 
+func chooseAccount(name string, loggedIn []string, limits map[string]time.Time, now time.Time) (string, error) {
+	if name == "default" {
+		name = ""
+	}
+	if !slices.Contains(loggedIn, name) {
+		return "", fmt.Errorf("no logged-in account %s", accounts.Label(name))
+	}
+	if t, ok := limits[name]; ok && t.After(now) {
+		return "", fmt.Errorf("%s is at its limit until %s; leave out --account to use a free account", accounts.Label(name), t.Format("Mon 15:04"))
+	}
+	return name, nil
+}
+
 func (m *model) limitedUntil(account string, now time.Time) (time.Time, bool) {
 	t, ok := m.state.Limits[account]
 	return t, ok && t.After(now)

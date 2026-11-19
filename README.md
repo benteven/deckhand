@@ -118,7 +118,7 @@ When a session hits a usage limit, the deck moves it to an account without a lim
 
 ### Subsessions
 
-A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> [--model fable|opus|sonnet] -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
+A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> [--account <account>] [--model fable|opus|sonnet] -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
 
 In the list, subsessions sit under their parent, indented with `↳`. When the parent is suspended, it shows in gray at its place with "suspended", and Enter resumes it. A subsession whose parent is gone shows "sub of" and the parent's name. In Suspended, a suspended subsession sits under its suspended parent. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
 
@@ -134,9 +134,9 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 
 | Command | Does |
 | --- | --- |
-| `session list` | JSON lines with id, name, folder, state and what the session needs |
+| `session list` | JSON lines with id, name, folder, state, agent, account, model and what the session needs |
 | `session search <words>` | Suspended sessions that match, newest first |
-| `session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT` | Start a session, on the Claude Code default model unless `--model` is given |
+| `session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT` | Start a session, on the Claude Code default model unless `--model` is given. A named account is kept, and the start fails when it is at its limit; `default` names the account in `~/.claude` |
 | `session resume <id> [--model fable|opus|sonnet]` | Resume a suspended session; `--model` sets the model it resumes on and keeps it |
 | `session send <id> -- TEXT` | Type into a session, as you |
 | `session handoff <id>`, `session close <id>` | Hand off or stop a session |

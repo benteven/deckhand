@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/typing"
@@ -23,6 +24,9 @@ type listLine struct {
 	Name    string `json:"name"`
 	Folder  string `json:"folder"`
 	State   string `json:"state"`
+	Agent   string `json:"agent"`
+	Account string `json:"account"`
+	Model   string `json:"model"`
 	Need    string `json:"need,omitempty"`
 	Message string `json:"message,omitempty"`
 }
@@ -121,9 +125,13 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 				return fail("a session named %s is running", req.Name)
 			}
 		}
-		account := req.Account
-		if account == "" {
-			account = m.state.Account
+		account := m.state.Account
+		if req.Account != "" {
+			a, err := chooseAccount(req.Account, m.loggedIn(), m.state.Limits, time.Now())
+			if err != nil {
+				return fail("%s", err)
+			}
+			account = a
 		}
 		text := req.Text
 		if text != "" {
@@ -131,7 +139,8 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		}
 		id := uuid.NewV4().String()
 		m.setModel(id, model)
-		return tea.Batch(m.saveState(), forRequest(m.start(id, req.Folder, req.Name, account, text), req.ID, id))
+		start := m.start(id, req.Folder, req.Name, account, text)
+		return tea.Batch(m.saveState(), forRequest(start, req.ID, id+" on account "+accounts.Label(m.state.AccountFor(id))))
 	case "resume", "send", "handoff", "close":
 	default:
 		return fail("unknown request %s", req.Op)
@@ -240,7 +249,14 @@ func (m *model) listOut() string {
 
 func (m *model) listLineOf(r deck.Row) listLine {
 	ev := m.in.Events[r.SessionID]
-	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Need: ev.Need, Message: ev.Message}
+	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Agent: "claude", Account: accounts.Label(m.state.AccountFor(r.SessionID)), Model: m.modelLabel(r.SessionID), Need: ev.Need, Message: ev.Message}
+}
+
+func (m *model) modelLabel(id string) string {
+	if model := m.modelFor(id); model != "" {
+		return model
+	}
+	return "default"
 }
 
 func rowState(r deck.Row) string {

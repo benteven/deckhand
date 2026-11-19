@@ -17,9 +17,9 @@ The deckhand binary is ` + exe + `.
 
 1. Run ` + "`ListAgents`" + ` and copy your own address from "This session is X [id]".
 2. Commit first if the subsession needs your uncommitted changes.
-3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" [--model fable|opus|sonnet] -- "<task>"` + "`" + `. It prints the subsession's name and worktree. Without ` + "`--model`" + ` it runs on the Claude Code default.
+3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" [--account <account>] [--model fable|opus|sonnet] -- "<task>"` + "`" + `. It prints the subsession's name, worktree and account. Without ` + "`--account`" + ` it uses your account. Without ` + "`--model`" + ` it runs on the Claude Code default.
 4. Talk to it with ` + "`SendMessage`" + ` to that name. It reports back to you the same way.
-5. List: ` + "`" + exe + " sub list`" + `. Close: ` + "`" + exe + " sub close <name>`" + `. Closing asks the user about the worktree; do not remove it yourself.
+5. List: ` + "`" + exe + " sub list`" + `: name, state, worktree, agent, account and model, split by tabs. Close: ` + "`" + exe + " sub close <name>`" + `. Closing asks the user about the worktree; do not remove it yourself.
 6. A subsession cannot start subsessions.
 `
 }
@@ -69,9 +69,9 @@ description: List, search, start, resume, type into, hand off and close deckhand
 
 The deckhand binary is ` + exe + `.
 
-1. ` + "`" + exe + " session list`" + `: JSON lines with id, name, folder, state, need, message.
+1. ` + "`" + exe + " session list`" + `: JSON lines with id, name, folder, state, agent, account, model, need, message.
 2. ` + "`" + exe + " session search <words>`" + `: suspended sessions that match, newest first.
-3. ` + "`" + exe + " session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT`" + `. Without ` + "`--model`" + ` it runs on the Claude Code default.
+3. ` + "`" + exe + " session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT`" + `. Without ` + "`--model`" + ` it runs on the Claude Code default. Without ` + "`--account`" + ` it uses the current account, or a free one when that account is at its limit. A named account is kept; deckhand refuses the start when it is at its limit. ` + "`default`" + ` names the account in ~/.claude.
 4. ` + "`" + exe + " session resume <id> [--model fable|opus|sonnet]`" + `. ` + "`--model`" + ` changes the model it resumes on and keeps it for later resumes.
 5. ` + "`" + exe + " session send <id> -- TEXT`" + `: types as the user. Refused while the session shows a menu; bring the menu to the user instead.
 6. ` + "`" + exe + " session handoff <id>`" + ` and ` + "`" + exe + " session close <id>`" + `.
