@@ -71,8 +71,8 @@ The deckhand binary is ` + exe + `.
 
 1. ` + "`" + exe + " session list`" + `: JSON lines with id, name, folder, state, need, message.
 2. ` + "`" + exe + " session search <words>`" + `: suspended sessions that match, newest first.
-3. ` + "`" + exe + " session start --folder F --name N [--account A] -- PROMPT`" + `.
-4. ` + "`" + exe + " session resume <id>`" + `.
+3. ` + "`" + exe + " session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT`" + `. Without ` + "`--model`" + ` it runs on the Claude Code default.
+4. ` + "`" + exe + " session resume <id> [--model fable|opus|sonnet]`" + `. ` + "`--model`" + ` changes the model it resumes on and keeps it for later resumes.
 5. ` + "`" + exe + " session send <id> -- TEXT`" + `: types as the user. Refused while the session shows a menu; bring the menu to the user instead.
 6. ` + "`" + exe + " session handoff <id>`" + ` and ` + "`" + exe + " session close <id>`" + `.
 `

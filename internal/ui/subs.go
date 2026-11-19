@@ -118,12 +118,7 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 		m.state.Accounts = map[string]string{}
 	}
 	m.state.Accounts[id] = account
-	if model := req.Args["model"]; model != "" {
-		if m.state.Models == nil {
-			m.state.Models = map[string]string{}
-		}
-		m.state.Models[id] = model
-	}
+	m.setModel(id, req.Args["model"])
 	prompt := ctl.FirstPrompt(req.Parent, msg.dir, msg.branch, req.Text)
 	out := fmt.Sprintf("started %s in %s on branch %s", req.Name, msg.dir, msg.branch)
 	return tea.Batch(m.saveState(), forRequest(m.start(id, msg.dir, req.Name, account, prompt), req.ID, out))

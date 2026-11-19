@@ -136,8 +136,8 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 | --- | --- |
 | `session list` | JSON lines with id, name, folder, state and what the session needs |
 | `session search <words>` | Suspended sessions that match, newest first |
-| `session start --folder F --name N [--account A] -- PROMPT` | Start a session |
-| `session resume <id>` | Resume a suspended session |
+| `session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT` | Start a session, on the Claude Code default model unless `--model` is given |
+| `session resume <id> [--model fable|opus|sonnet]` | Resume a suspended session; `--model` sets the model it resumes on and keeps it |
 | `session send <id> -- TEXT` | Type into a session, as you |
 | `session handoff <id>`, `session close <id>` | Hand off or stop a session |
 

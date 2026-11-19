@@ -106,6 +106,10 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	if !m.ops.Cfg.Assistant || req.Caller != m.state.Assistant.ID {
 		return fail("only the assistant can do this")
 	}
+	model := req.Args["model"]
+	if model != "" && !slices.Contains(taskModels, model) {
+		return fail("model is one of %s", strings.Join(taskModels, ", "))
+	}
 	switch req.Op {
 	case "list":
 		return m.answer(req.ID, ctl.Reply{Out: m.listOut()})
@@ -126,7 +130,8 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 			text = viaAssistant(text)
 		}
 		id := uuid.NewV4().String()
-		return forRequest(m.start(id, req.Folder, req.Name, account, text), req.ID, id)
+		m.setModel(id, model)
+		return tea.Batch(m.saveState(), forRequest(m.start(id, req.Folder, req.Name, account, text), req.ID, id))
 	case "resume", "send", "handoff", "close":
 	default:
 		return fail("unknown request %s", req.Op)
@@ -144,7 +149,8 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		}
 		m.resuming[r.SessionID] = true
 		delete(m.ending, r.SessionID)
-		return forRequest(m.resume(r), req.ID, "resumed")
+		m.setModel(r.SessionID, model)
+		return tea.Batch(m.saveState(), forRequest(m.resume(r), req.ID, "resumed"))
 	}
 	if (req.Op == "handoff" || req.Op == "close") && r.SessionID == m.state.Assistant.ID {
 		return fail("the assistant cannot do this to itself")
@@ -174,6 +180,16 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("%s", err)
 	}
 	return m.typeIn(r, prompt, m.handoffTyped(r.PaneID, m.replyTyped(req.ID, r.Name, "handed off")))
+}
+
+func (m *model) setModel(id, model string) {
+	if model == "" {
+		return
+	}
+	if m.state.Models == nil {
+		m.state.Models = map[string]string{}
+	}
+	m.state.Models[id] = model
 }
 
 func (m *model) answer(id string, rep ctl.Reply) tea.Cmd {
