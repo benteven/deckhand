@@ -122,7 +122,7 @@ A limit can end before its reset time. Deckhand clears it when a session on that
 
 ### Subsessions
 
-A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> [--account <account>] [--model fable|opus|sonnet] -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
+A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> [--agent claude|codex] [--account <account>] [--model fable|opus|sonnet] -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
 
 In the list, subsessions sit under their parent, indented with `↳`. When the parent is suspended, it shows in gray at its place with "suspended", and Enter resumes it. A subsession whose parent is gone shows "sub of" and the parent's name. In Suspended, a suspended subsession sits under its suspended parent. `ctrl-\` steps through a parent and its running subsessions and wraps around; it does nothing for a session with no running family.
 
@@ -140,18 +140,28 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 | --- | --- |
 | `session list` | JSON lines with id, name, folder, state, agent, account, model and what the session needs |
 | `session search <words>` | Suspended sessions that match, newest first |
-| `session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT` | Start a session, on the Claude Code default model unless `--model` is given. A named account is kept, and the start fails when it is at its limit; `default` names the account in `~/.claude` |
-| `session resume <id> [--model fable|opus|sonnet]` | Resume a suspended session; `--model` sets the model it resumes on and keeps it |
+| `session start --folder F --name N [--agent claude\|codex] [--account A] [--model M] -- PROMPT` | Start a session, on the Claude Code default model unless `--model` is given (fable, opus or sonnet for Claude, any model for Codex). A named account is kept, and the start fails when it is at its limit; `default` names the account in `~/.claude` |
+| `session resume <id> [--model M]` | Resume a suspended session; `--model` sets the model it resumes on and keeps it |
 | `session send <id> -- TEXT` | Type into a session, as you |
 | `session handoff <id>`, `session close <id>` | Hand off or stop a session |
 
-`send` types only into a normal prompt. It is refused while the session shows a permission prompt or a question menu, while you are in that pane, and while the session hands off.
+Any deckhand session, Claude or Codex, can run `deckhand msg <name> -- TEXT`. Deckhand types `[from <your name>] TEXT` into the running session with that name; `assistant` is the assistant. It is refused with the reason while the target works, shows a menu, hands off, or you are in its pane.
+
+`send` and `msg` type only into a normal prompt. It is refused while the session shows a permission prompt or a question menu, while you are in that pane, and while the session hands off.
 
 Menus go to you. The assistant never answers a permission prompt or a question menu in another session. When a session starts to wait for you and you are not looking at it, deckhand types a "[deckhand]" note about it into the assistant.
 
 Keep-alive: if the assistant stops, deckhand starts it again, at most once in 60 seconds, and shows the error in the list. Each start sends it a prompt to read `instructions.md` and set up its hourly round again. At the first refresh after 04:00 each day, deckhand updates Claude Code (`brew upgrade --cask claude-code` for a Homebrew install, else `claude update`), then restarts the assistant when it is idle and you are not in its pane. Above 60% context, the restart goes through a handoff note. Press `s` on the assistant to pause it: the row stays at the top of Active with the marks "assistant" and "paused", and nothing restarts it until you resume it with Enter.
 
 The rules: with the assistant on, every session you start in deckhand gets a short set of standing rules. Each session tells the assistant about new work, reports what changed when asked, cleans up its worktree and branch after a merged PR, marks text that begins with "[via assistant]" as coming from you, and, when it is a task, keeps its line on the task page current. Each session may also run `deckhand task`, `role` and `queue` without a prompt; the list checks who asks.
+
+### Codex sessions
+
+Deckhand can run the OpenAI Codex CLI next to Claude Code. The assistant runs `deckhand session start --agent codex --folder F --name N -- PROMPT`, and a session runs `deckhand sub start --agent codex ...` for a Codex subsession. Deckhand starts `codex` in a pane (`DECKHAND_CODEX` names another binary), with `--model` when given. Its first prompt tells it to reach other sessions with `deckhand msg`; a Codex subsession reports to its parent that way, and the parent answers it the same way.
+
+What works: the list, `session list` with working, waiting and the permission prompt, `session send`, `deckhand msg`, suspend, and `session resume` (it runs `codex resume` on the Codex thread deckhand saw at the first prompt). Deckhand passes its hooks with `-c` at each start and marks them trusted for that start only; `~/.codex/config.toml` is not changed. It also adds `~/.config/deckhand/requests` to the workspace-write sandbox, so `deckhand msg` works from inside Codex, and turns off the update prompt at start.
+
+What does not work yet: accounts (Codex uses `~/.codex`, so `--account` is refused), the usage line, handoff, review, fork, task start and transcript search.
 
 ### Tasks
 
