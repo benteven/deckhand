@@ -477,7 +477,7 @@ func (m *model) relaunch(r deck.Row, fresh, prompt string) tea.Cmd {
 	if m.resuming[r.SessionID] {
 		return nil
 	}
-	if !accounts.LoggedIn(m.home, account) {
+	if m.state.Agent(r.SessionID) != "codex" && !accounts.LoggedIn(m.home, account) {
 		m.err = fmt.Errorf("account %s is not logged in, press A to log in", account)
 		return nil
 	}
