@@ -135,6 +135,9 @@ func (o Ops) codexArgs(l Launch) ([]string, error) {
 	if err := os.MkdirAll(requests, 0o700); err != nil {
 		return nil, err
 	}
+	if err := events.Record(filepath.Join(o.Home, "events"), l.SessionID, "SessionStart", time.Now()); err != nil {
+		return nil, err
+	}
 	args := []string{"env", ctl.SessionEnv + "=" + l.SessionID, paths.CodexCommand()}
 	if l.Resume {
 		if l.Thread == "" {

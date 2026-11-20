@@ -221,11 +221,11 @@ func RunCodexHook(dir, sessionID string, stdin io.Reader, now time.Time) error {
 func (s *State) codex(in codexInput, now time.Time) bool {
 	switch in.Event {
 	case "SessionStart":
-		if in.SessionID == "" || in.SessionID == s.Thread {
-			return false
+		changed := s.record(in.Event, now)
+		if in.SessionID != "" && in.SessionID != s.Thread {
+			s.Thread, changed = in.SessionID, true
 		}
-		s.Thread = in.SessionID
-		return true
+		return changed
 	case "PermissionRequest":
 		if !s.record("Notification", now) {
 			return false
