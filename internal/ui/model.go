@@ -286,6 +286,8 @@ type model struct {
 	cleanup        *cleanupDialog
 
 	switches      map[string]bool
+	checks        map[string]time.Time
+	nudged        map[string]time.Time
 	continueAfter map[string]bool
 	paneAccount   map[string]string
 	loginPane     string
@@ -521,6 +523,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.accountRemoved(msg)
 	case textHitsMsg:
 		return m, m.gotTextHits(msg)
+	case limitCheckMsg:
+		return m, m.limitChecked(msg)
 	case startedMsg:
 		return m, m.started(msg)
 	case typedMsg:
@@ -1792,6 +1796,7 @@ func (m *model) saveState() tea.Cmd {
 	sv.mu.Lock()
 	st := m.state
 	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
+	st.LimitSeen = maps.Clone(st.LimitSeen)
 	st.Models, st.Roles = maps.Clone(st.Models), maps.Clone(st.Roles)
 	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
 	st.Projects = slices.Clone(st.Projects)

@@ -12,6 +12,14 @@ import (
 	"github.com/benteven/deckhand/internal/usage"
 )
 
+const recheckEvery = 30 * time.Minute
+
+type limitCheckMsg struct {
+	account string
+	ok      bool
+	err     error
+}
+
 func limitFresh(r deck.Row) bool {
 	l := r.Summary.Limit
 	return r.Kind == deck.Live && !l.At.IsZero() && !r.Started.IsZero() && l.At.After(r.Started)
@@ -72,6 +80,59 @@ func (m *model) fallBack(id, from, to string) {
 	}
 }
 
+func answered(r deck.Row, since time.Time) bool {
+	s := r.Summary
+	return r.Kind == deck.Live && s.Limit.At.IsZero() && s.Model != "<synthetic>" && s.LastUsed.After(since)
+}
+
+func (m *model) clearLimit(acct string, now time.Time) {
+	delete(m.state.Limits, acct)
+	if m.state.LimitSeen == nil {
+		m.state.LimitSeen = map[string]time.Time{}
+	}
+	m.state.LimitSeen[acct] = now
+}
+
+func (m *model) nudge(r deck.Row) tea.Cmd {
+	if m.nudged == nil {
+		m.nudged = map[string]time.Time{}
+	}
+	at := r.Summary.Limit.At
+	if r.Busy || r.Asking || r.PaneID == m.slot || m.typing[r.PaneID] || m.nudged[r.SessionID].Equal(at) {
+		return nil
+	}
+	m.nudged[r.SessionID] = at
+	return m.typeOrHold(r, "continue", func() {})
+}
+
+func (m *model) recheck(skip string, now time.Time) []tea.Cmd {
+	if m.checks == nil {
+		m.checks = map[string]time.Time{}
+	}
+	var cmds []tea.Cmd
+	for name := range m.state.Limits {
+		if name == skip || !slices.Contains(m.loggedIn(), name) || now.Sub(m.checks[name]) < recheckEvery {
+			continue
+		}
+		m.checks[name] = now
+		ops, account := m.ops, name
+		cmds = append(cmds, func() tea.Msg {
+			ok, err := ops.CheckAccount(account)
+			return limitCheckMsg{account: account, ok: ok, err: err}
+		})
+	}
+	return cmds
+}
+
+func (m *model) limitChecked(msg limitCheckMsg) tea.Cmd {
+	if msg.err != nil || !msg.ok {
+		return nil
+	}
+	m.clearLimit(msg.account, time.Now())
+	m.hint = accounts.Label(msg.account) + " works again"
+	return tea.Batch(m.saveState(), m.advanceLimits(time.Now()))
+}
+
 func (m *model) launchAccount(id, account string) string {
 	now := time.Now()
 	if _, limited := m.limitedUntil(account, now); !limited {
@@ -89,22 +150,48 @@ func (m *model) advanceLimits(now time.Time) tea.Cmd {
 	changed := false
 	for name, t := range m.state.Limits {
 		if !t.After(now) {
-			delete(m.state.Limits, name)
+			m.clearLimit(name, now)
+			changed = true
+		}
+	}
+	held := map[string]bool{}
+	for _, r := range m.liveRows() {
+		if acct := m.paneAccount[r.PaneID]; limitFresh(r) && !r.Summary.Limit.At.Before(m.state.LimitSeen[acct]) {
+			held[acct] = true
+		}
+	}
+	for _, r := range m.liveRows() {
+		acct := m.paneAccount[r.PaneID]
+		if _, limited := m.state.Limits[acct]; limited && !held[acct] && answered(r, m.state.LimitSeen[acct]) {
+			m.clearLimit(acct, now)
 			changed = true
 		}
 	}
 	var moved, back []deck.Row
+	var cmds []tea.Cmd
 	from, to := "", ""
 	for _, r := range m.liveRows() {
 		if !limitFresh(r) || m.resuming[r.SessionID] || m.switches[r.PaneID] {
 			continue
 		}
 		acct := m.paneAccount[r.PaneID]
-		if until := r.Summary.Limit.Resets; until.After(now) && until.After(m.state.Limits[acct]) {
+		_, limited := m.limitedUntil(acct, now)
+		stale := r.Summary.Limit.At.Before(m.state.LimitSeen[acct])
+		if stale && !limited {
+			cmds = append(cmds, m.nudge(r))
+			continue
+		}
+		if until := r.Summary.Limit.Resets; !stale && until.After(now) && until.After(m.state.Limits[acct]) {
 			if m.state.Limits == nil {
 				m.state.Limits = map[string]time.Time{}
 			}
+			if m.state.LimitSeen == nil {
+				m.state.LimitSeen = map[string]time.Time{}
+			}
 			m.state.Limits[acct] = until
+			if r.Summary.Limit.At.After(m.state.LimitSeen[acct]) {
+				m.state.LimitSeen[acct] = r.Summary.Limit.At
+			}
 			changed = true
 		}
 		if _, limited := m.limitedUntil(acct, now); !limited {
@@ -112,6 +199,7 @@ func (m *model) advanceLimits(now time.Time) tea.Cmd {
 		}
 		next, ok := m.freeAccount(acct, now)
 		if !ok {
+			cmds = append(cmds, m.recheck(acct, now)...)
 			continue
 		}
 		m.fallBack(r.SessionID, acct, next)
@@ -142,9 +230,9 @@ func (m *model) advanceLimits(now time.Time) tea.Cmd {
 		changed = true
 	}
 	if !changed {
-		return nil
+		return tea.Batch(cmds...)
 	}
-	cmds := []tea.Cmd{m.saveState()}
+	cmds = append(cmds, m.saveState())
 	if len(back) > 0 {
 		cmds = append(cmds, m.queueSwitch(back, 0))
 	}

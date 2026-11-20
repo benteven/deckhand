@@ -118,6 +118,8 @@ When a session hits a usage limit, the deck moves it to an account without a lim
 
 The bottom of the list shows each account's use, in the account's color: `work  5h 23%  week 41%`, or `work  limit until 14:00`. The numbers come from Claude Code's status line and are there for Pro and Max plans after a session on that account gets its first answer. Until then the line says "no data yet".
 
+A limit can end before its reset time. Deckhand clears it when a session on that account answers again. When a session must move and no account is free, deckhand checks the other limited accounts with a one-line Haiku prompt (`claude -p --no-session-persistence`), at most every 30 minutes for each account. When an account answers, deckhand clears its limit and moves the session. When a limit ends, early or at its reset time, sessions that stopped on it get "continue", and moved sessions go back.
+
 ### Subsessions
 
 A session can start helper sessions with the `subsession` skill. Each subsession is a full Claude Code session in its own git worktree, started from the parent's folder. The skill runs `deckhand sub start --name <name> --parent <address> [--account <account>] [--model fable|opus|sonnet] -- "<task>"`, and `deckhand sub list` and `deckhand sub close <name>` list and close them. The parent and the subsession talk to each other with `SendMessage`.
