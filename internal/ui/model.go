@@ -1815,7 +1815,7 @@ func (m *model) saveState() tea.Cmd {
 	st := m.state
 	st.Names, st.Accounts, st.Limits, st.Fallbacks = maps.Clone(st.Names), maps.Clone(st.Accounts), maps.Clone(st.Limits), maps.Clone(st.Fallbacks)
 	st.LimitSeen = maps.Clone(st.LimitSeen)
-	st.Models, st.Roles = maps.Clone(st.Models), maps.Clone(st.Roles)
+	st.Models, st.Roles, st.Codex = maps.Clone(st.Models), maps.Clone(st.Roles), maps.Clone(st.Codex)
 	st.Active, st.Subs, st.Cleanups = slices.Clone(st.Active), slices.Clone(st.Subs), slices.Clone(st.Cleanups)
 	st.Projects = slices.Clone(st.Projects)
 	st.Queues = maps.Clone(st.Queues)
