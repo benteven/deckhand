@@ -1,6 +1,8 @@
 package deck
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -149,6 +151,25 @@ func (o Ops) StopJob(job, account string) error {
 		return fmt.Errorf("claude stop %s: %v: %s", job, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func (o Ops) CheckAccount(account string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, paths.ClaudeCommand(), "-p", "--output-format", "json", "--no-session-persistence", "--model", "haiku", "Reply with ok")
+	cmd.Dir = o.Home
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(e string) bool { return strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") })
+	if account != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+accounts.Dir(o.Home, account))
+	}
+	out, _ := cmd.Output()
+	var res struct {
+		IsError *bool `json:"is_error"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil || res.IsError == nil {
+		return false, fmt.Errorf("check %s: no answer from claude", accounts.Label(account))
+	}
+	return !*res.IsError, nil
 }
 
 func (o Ops) Login(exe, account string) (string, error) {

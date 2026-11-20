@@ -112,6 +112,7 @@ type State struct {
 	Account   string               `json:"account,omitempty"`
 	Accounts  map[string]string    `json:"accounts,omitempty"`
 	Limits    map[string]time.Time `json:"limits,omitempty"`
+	LimitSeen map[string]time.Time `json:"limit_seen,omitempty"`
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
 	Models    map[string]string    `json:"models,omitempty"`
 	Roles     map[string]string    `json:"roles,omitempty"`
