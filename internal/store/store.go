@@ -106,6 +106,13 @@ type Subsession struct {
 	Branch string `json:"branch"`
 }
 
+type Codex struct {
+	Cwd      string    `json:"cwd"`
+	Name     string    `json:"name"`
+	Thread   string    `json:"thread,omitempty"`
+	LastUsed time.Time `json:"last_used"`
+}
+
 type State struct {
 	Names     map[string]string    `json:"names"`
 	Active    []ActiveEntry        `json:"active"`
@@ -115,6 +122,7 @@ type State struct {
 	LimitSeen map[string]time.Time `json:"limit_seen,omitempty"`
 	Fallbacks map[string]string    `json:"fallbacks,omitempty"`
 	Models    map[string]string    `json:"models,omitempty"`
+	Codex     map[string]Codex     `json:"codex,omitempty"`
 	Roles     map[string]string    `json:"roles,omitempty"`
 	Projects  []string             `json:"projects,omitempty"`
 	Assistant Assistant            `json:"assistant"`
@@ -137,6 +145,13 @@ func (s State) AccountFor(sessionID string) string {
 		return a
 	}
 	return s.Account
+}
+
+func (s State) Agent(id string) string {
+	if _, ok := s.Codex[id]; ok {
+		return "codex"
+	}
+	return "claude"
 }
 
 func ReadJSON(path string, v any) error {

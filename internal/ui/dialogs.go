@@ -397,10 +397,12 @@ func (m *model) deleteKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) trash(r deck.Row) tea.Cmd {
-	eventsDir, home := filepath.Join(m.home, "events"), m.home
+	eventsDir, home, codex := filepath.Join(m.home, "events"), m.home, m.state.Agent(r.SessionID) == "codex"
 	return func() tea.Msg {
-		if err := deck.TrashSession(r.SessionID, r.TranscriptPath); err != nil {
-			return errMsg{err}
+		if !codex {
+			if err := deck.TrashSession(r.SessionID, r.TranscriptPath); err != nil {
+				return errMsg{err}
+			}
 		}
 		os.RemoveAll(review.Dir(home, r.SessionID))
 		return trashedMsg{id: r.SessionID, err: events.Remove(eventsDir, r.SessionID)}
@@ -415,6 +417,7 @@ func (m *model) trashed(msg trashedMsg) tea.Cmd {
 	m.err = msg.err
 	delete(m.state.Names, msg.id)
 	delete(m.state.Accounts, msg.id)
+	delete(m.state.Codex, msg.id)
 	delete(m.in.Summaries, msg.id)
 	m.in.Files = m.withoutGone(m.in.Files)
 	m.rebuild()

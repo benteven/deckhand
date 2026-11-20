@@ -14,6 +14,7 @@ import (
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/typing"
 )
 
@@ -115,9 +116,7 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("only the assistant can do this")
 	}
 	model := req.Args["model"]
-	if model != "" && !slices.Contains(taskModels, model) {
-		return fail("model is one of %s", strings.Join(taskModels, ", "))
-	}
+	badModel := model != "" && !slices.Contains(taskModels, model)
 	switch req.Op {
 	case "list":
 		return m.answer(req.ID, ctl.Reply{Out: m.listOut()})
@@ -129,8 +128,17 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 				return fail("a session named %s is running", req.Name)
 			}
 		}
+		codex := req.Args["agent"] == "codex"
+		switch {
+		case badModel && !codex:
+			return fail("model is one of %s", strings.Join(taskModels, ", "))
+		case codex && req.Account != "":
+			return fail("codex sessions use the default ~/.codex; leave out --account")
+		}
 		account := m.state.Account
-		if req.Account != "" {
+		if codex {
+			account = ""
+		} else if req.Account != "" {
 			a, err := chooseAccount(req.Account, m.loggedIn(), m.state.Limits, time.Now())
 			if err != nil {
 				return fail("%s", err)
@@ -142,6 +150,10 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 			text = viaAssistant(text)
 		}
 		id := uuid.NewV4().String()
+		if codex {
+			m.setCodex(id, req.Folder, req.Name)
+			text = strings.TrimSpace(ctl.CodexIntro(m.ops.Exe) + "\n\n" + text)
+		}
 		m.setModel(id, model)
 		start := m.start(id, req.Folder, req.Name, account, text)
 		return tea.Batch(m.saveState(), forRequest(start, req.ID, id+" on account "+accounts.Label(m.state.AccountFor(id))))
@@ -155,6 +167,8 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	}
 	if req.Op == "resume" {
 		switch {
+		case badModel && m.state.Agent(r.SessionID) != "codex":
+			return fail("model is one of %s", strings.Join(taskModels, ", "))
 		case r.Kind == deck.Elsewhere:
 			return fail("%s runs in another terminal", r.Name)
 		case r.Kind == deck.Live || m.resuming[r.SessionID]:
@@ -167,6 +181,9 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	}
 	if (req.Op == "handoff" || req.Op == "close") && r.SessionID == m.state.Assistant.ID {
 		return fail("the assistant cannot do this to itself")
+	}
+	if req.Op == "handoff" && m.state.Agent(r.SessionID) == "codex" {
+		return fail("handoff does not work for codex sessions")
 	}
 	if r.Kind != deck.Live || m.resuming[r.SessionID] {
 		return fail("%s is not running", r.Name)
@@ -228,6 +245,13 @@ func (m *model) msgRequest(req ctl.Request) tea.Cmd {
 	return m.typeIn(r, "[from "+from.Name+"] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
 }
 
+func (m *model) setCodex(id, cwd, name string) {
+	if m.state.Codex == nil {
+		m.state.Codex = map[string]store.Codex{}
+	}
+	m.state.Codex[id] = store.Codex{Cwd: cwd, Name: name, LastUsed: time.Now()}
+}
+
 func (m *model) setModel(id, model string) {
 	if model == "" {
 		return
@@ -286,7 +310,7 @@ func (m *model) listOut() string {
 
 func (m *model) listLineOf(r deck.Row) listLine {
 	ev := m.in.Events[r.SessionID]
-	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Agent: "claude", Account: accounts.Label(m.state.AccountFor(r.SessionID)), Model: m.modelLabel(r.SessionID), Need: ev.Need, Message: ev.Message}
+	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Agent: m.state.Agent(r.SessionID), Account: accounts.Label(m.state.AccountFor(r.SessionID)), Model: m.modelLabel(r.SessionID), Need: ev.Need, Message: ev.Message}
 }
 
 func (m *model) modelLabel(id string) string {

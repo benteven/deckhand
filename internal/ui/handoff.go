@@ -53,6 +53,8 @@ func (m *model) startHandoff(r deck.Row) tea.Cmd {
 
 func (m *model) handoffRefusal(r deck.Row) string {
 	switch {
+	case m.state.Agent(r.SessionID) == "codex":
+		return "Handoff does not work for codex sessions"
 	case m.handoffs[r.PaneID] != nil:
 		return "A handoff is already running for this session"
 	case r.Asking || m.in.Events[r.SessionID].Menu():
@@ -198,9 +200,9 @@ func (m *model) typeIn(r deck.Row, text string, then func(error) tea.Cmd) tea.Cm
 		m.typing = map[string]bool{}
 	}
 	m.typing[r.PaneID] = true
-	t, id, pane, text := m.ops.T, r.SessionID, r.PaneID, textclean.Clean(text)
+	t, id, pane, text, codex := m.ops.T, r.SessionID, r.PaneID, textclean.Clean(text), m.state.Agent(r.SessionID) == "codex"
 	return func() tea.Msg {
-		return typedMsg{pane: pane, err: typing.Type(t, id, pane, text), then: then}
+		return typedMsg{pane: pane, err: typing.Type(t, id, pane, text, codex), then: then}
 	}
 }
 

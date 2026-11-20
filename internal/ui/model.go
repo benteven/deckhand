@@ -1345,6 +1345,24 @@ func (m *model) syncCwds() bool {
 	return changed
 }
 
+func (m *model) syncCodex() bool {
+	changed := false
+	for id, c := range m.state.Codex {
+		ev, ok := m.in.Events[id]
+		if !ok {
+			continue
+		}
+		if ev.Thread != "" && ev.Thread != c.Thread {
+			c.Thread, changed = ev.Thread, true
+		}
+		if ev.At.After(c.LastUsed) {
+			c.LastUsed, changed = ev.At, true
+		}
+		m.state.Codex[id] = c
+	}
+	return changed
+}
+
 func (m *model) dropStale(r deck.Row) tea.Cmd {
 	m.state.Active = slices.DeleteFunc(m.state.Active, func(e store.ActiveEntry) bool { return e.SessionID == r.SessionID })
 	m.rebuild()
@@ -1601,7 +1619,7 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 
 	cmds := m.syncReviews(msg.panes, msg.reviews)
 	cmds = append(cmds, followed, m.endDead(msg.panes, slotPane), m.endLogin(loginDead, loginGone))
-	if m.syncCwds() {
+	if cwds, codex := m.syncCwds(), m.syncCodex(); cwds || codex {
 		cmds = append(cmds, m.saveState())
 	}
 	if m.rebuild() && m.loaded {
@@ -1846,7 +1864,9 @@ func (m *model) launch(l deck.Launch) tea.Cmd {
 		}
 		m.state.Accounts[l.SessionID] = l.Account
 	}
-	l.Account = m.launchAccount(l.SessionID, l.Account)
+	if m.state.Agent(l.SessionID) != "codex" {
+		l.Account = m.launchAccount(l.SessionID, l.Account)
+	}
 	start := m.starter(m.ops, l.SessionID)
 	return func() tea.Msg {
 		pane, warn, err := start(l)
@@ -1856,12 +1876,16 @@ func (m *model) launch(l deck.Launch) tea.Cmd {
 
 func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (pane string, warn, err error) {
 	home, role, model := m.home, m.state.Roles[id], m.modelFor(id)
+	codex, isCodex := m.state.Codex[id]
 	notes := ""
 	if m.projectOf(id) {
 		notes = projectNotesText(m.notesPath(id))
 	}
 	return func(l deck.Launch) (string, error, error) {
 		l.Model = model
+		if isCodex {
+			l.Agent, l.Thread = "codex", codex.Thread
+		}
 		var warn error
 		if role != "" {
 			if r, err := roles.Find(home, ctl.TopLevel(l.Cwd), role); err == nil {
@@ -1879,7 +1903,10 @@ func (m *model) starter(ops deck.Ops, id string) func(deck.Launch) (pane string,
 }
 
 func (m *model) resume(r deck.Row) tea.Cmd {
-	start, account := m.starter(m.ops, r.SessionID), m.launchAccount(r.SessionID, m.state.AccountFor(r.SessionID))
+	start, account := m.starter(m.ops, r.SessionID), m.state.AccountFor(r.SessionID)
+	if m.state.Agent(r.SessionID) != "codex" {
+		account = m.launchAccount(r.SessionID, account)
+	}
 	name, home := m.state.Names[r.SessionID], m.home
 	sub, isSub := m.state.SubOf(r.SessionID)
 	queued := slices.Contains(m.state.Cleanups, r.SessionID)

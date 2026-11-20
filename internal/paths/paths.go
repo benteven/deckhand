@@ -63,6 +63,13 @@ func ClaudeCommand() string {
 	return "claude"
 }
 
+func CodexCommand() string {
+	if v := os.Getenv("DECKHAND_CODEX"); v != "" {
+		return v
+	}
+	return "codex"
+}
+
 func Opener() string {
 	if v := os.Getenv("DECKHAND_OPEN"); v != "" {
 		return v

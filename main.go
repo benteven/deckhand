@@ -174,7 +174,14 @@ func runPreview(args []string) {
 }
 
 func runHook() {
-	if err := events.RunHook(filepath.Join(paths.DeckHome(), "events"), os.Stdin, time.Now()); err != nil {
+	dir := filepath.Join(paths.DeckHome(), "events")
+	var err error
+	if len(os.Args) > 2 && os.Args[2] == "codex" {
+		err = events.RunCodexHook(dir, os.Getenv(ctl.SessionEnv), os.Stdin, time.Now())
+	} else {
+		err = events.RunHook(dir, os.Stdin, time.Now())
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
 }

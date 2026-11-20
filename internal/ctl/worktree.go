@@ -181,6 +181,14 @@ func DeleteBranch(repo, branch string) error {
 	return err
 }
 
+func CodexIntro(exe string) string {
+	return fmt.Sprintf("You run in deckhand. To reach another deckhand session, run `%s msg NAME -- TEXT`; the assistant is NAME assistant.", exe)
+}
+
+func CodexFirstPrompt(exe, parent, dir, branch, task string) string {
+	return fmt.Sprintf("%s\nYou are a subsession of %s, started by deckhand. You work in your own git worktree at %s, on branch %s. Report to %s with `%s msg %s -- TEXT` when you finish or need a decision.\n\nTask:\n%s", CodexIntro(exe), parent, dir, branch, parent, exe, parent, task)
+}
+
 func FirstPrompt(parent, dir, branch, task string) string {
 	return fmt.Sprintf("You are a subsession of %s, started by deckhand. You work in your own git worktree at %s, on branch %s. Report to %s with SendMessage when you finish or need a decision.\n\nTask:\n%s", parent, dir, branch, parent, task)
 }

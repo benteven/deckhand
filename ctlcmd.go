@@ -59,7 +59,7 @@ func randomID() string {
 func ctlUsage(group string) string {
 	switch group {
 	case "sub":
-		return "usage:\n  deckhand sub start --name NAME --parent ADDR [--account ACCOUNT] [--model fable|opus|sonnet] -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
+		return "usage:\n  deckhand sub start --name NAME --parent ADDR [--agent claude|codex] [--account ACCOUNT] [--model MODEL] -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
 	case "task":
 		return "usage:\n  deckhand task new --title T [--prio P] [--deadline D] [--from F] [--project NAME] -- CONTEXT\n  deckhand task list\n  deckhand task start ID [--model fable|opus|sonnet]\n  deckhand task update [ID] [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]\n  deckhand task done [ID] [--summary TEXT]\n"
 	case "project":
@@ -73,7 +73,7 @@ func ctlUsage(group string) string {
 	case "msg":
 		return "usage:\n  deckhand msg NAME -- TEXT\n"
 	}
-	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] [--model fable|opus|sonnet] -- PROMPT\n  deckhand session resume ID [--model fable|opus|sonnet]\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
+	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--agent claude|codex] [--account ACCOUNT] [--model MODEL] -- PROMPT\n  deckhand session resume ID [--model fable|opus|sonnet]\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
 
 func splitDash(args []string) ([]string, []string, bool) {
@@ -169,8 +169,11 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 		if !ok || len(tail) == 0 {
 			return ctl.Request{}, errUsage
 		}
-		f, err := parseFlags(head, "folder", "name", "account", "model")
+		f, err := parseFlags(head, "folder", "name", "account", "model", "agent")
 		if err != nil {
+			return ctl.Request{}, err
+		}
+		if err := checkAgent(f); err != nil {
 			return ctl.Request{}, err
 		}
 		if f["folder"] == "" || f["name"] == "" {
@@ -180,7 +183,7 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 		if err != nil {
 			return ctl.Request{}, err
 		}
-		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
+		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"], "agent": f["agent"]}}, nil
 	}
 	return ctl.Request{}, errUsage
 }
@@ -191,6 +194,13 @@ func parseMsg(name string, rest []string) (ctl.Request, error) {
 		return ctl.Request{}, errUsage
 	}
 	return ctl.Request{Op: "msg", Name: name, Text: strings.Join(tail, " ")}, nil
+}
+
+func checkAgent(f map[string]string) error {
+	if a := f["agent"]; a != "" && a != "claude" && a != "codex" {
+		return fmt.Errorf("agent is claude or codex")
+	}
+	return nil
 }
 
 func parseSub(verb string, rest []string) (ctl.Request, error) {
@@ -210,14 +220,17 @@ func parseSub(verb string, rest []string) (ctl.Request, error) {
 		if !ok || len(tail) == 0 {
 			return ctl.Request{}, errUsage
 		}
-		f, err := parseFlags(head, "name", "parent", "account", "model")
+		f, err := parseFlags(head, "name", "parent", "account", "model", "agent")
 		if err != nil {
+			return ctl.Request{}, err
+		}
+		if err := checkAgent(f); err != nil {
 			return ctl.Request{}, err
 		}
 		if f["name"] == "" || f["parent"] == "" {
 			return ctl.Request{}, errUsage
 		}
-		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
+		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"], "agent": f["agent"]}}, nil
 	}
 	return ctl.Request{}, errUsage
 }
