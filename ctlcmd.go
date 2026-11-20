@@ -71,7 +71,7 @@ func ctlUsage(group string) string {
 	case "chat":
 		return "usage:\n  deckhand chat reply -- TEXT\n"
 	}
-	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] -- PROMPT\n  deckhand session resume ID\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
+	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] [--model fable|opus|sonnet] -- PROMPT\n  deckhand session resume ID [--model fable|opus|sonnet]\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
 
 func splitDash(args []string) ([]string, []string, bool) {
@@ -140,7 +140,16 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 			return ctl.Request{}, errUsage
 		}
 		return ctl.Request{Op: "search", Text: strings.Join(rest, " ")}, nil
-	case "resume", "handoff", "close":
+	case "resume":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "--") {
+			return ctl.Request{}, errUsage
+		}
+		f, err := parseFlags(rest[1:], "model")
+		if err != nil {
+			return ctl.Request{}, err
+		}
+		return ctl.Request{Op: verb, Target: rest[0], Args: f}, nil
+	case "handoff", "close":
 		if len(rest) != 1 {
 			return ctl.Request{}, errUsage
 		}
@@ -156,7 +165,7 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 		if !ok || len(tail) == 0 {
 			return ctl.Request{}, errUsage
 		}
-		f, err := parseFlags(head, "folder", "name", "account")
+		f, err := parseFlags(head, "folder", "name", "account", "model")
 		if err != nil {
 			return ctl.Request{}, err
 		}
@@ -167,7 +176,7 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 		if err != nil {
 			return ctl.Request{}, err
 		}
-		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " ")}, nil
+		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
 	}
 	return ctl.Request{}, errUsage
 }
