@@ -47,3 +47,30 @@ func TestNotificationNeed(t *testing.T) {
 	assert.False(t, s.Menu())
 	assert.Empty(t, s.Message)
 }
+
+func TestCodexHook(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	steps := []struct {
+		payload             string
+		busy, waiting, menu bool
+	}{
+		{`{"session_id":"th1","hook_event_name":"SessionStart","source":"startup"}`, false, false, false},
+		{`{"session_id":"th1","hook_event_name":"UserPromptSubmit","prompt":"hi"}`, true, false, false},
+		{`{"session_id":"th1","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build","description":"Remove the build folder"}}`, false, true, true},
+		{`{"session_id":"th1","hook_event_name":"PostToolUse","tool_name":"Bash"}`, true, false, false},
+		{`{"session_id":"th1","hook_event_name":"Stop","stop_hook_active":false}`, false, true, false},
+	}
+	for i, st := range steps {
+		require.NoError(t, RunCodexHook(dir, "d1", strings.NewReader(st.payload), now.Add(time.Duration(i)*time.Second)))
+		s, err := Read(dir, "d1")
+		require.NoError(t, err)
+		assert.Equal(t, "th1", s.Thread)
+		assert.Equal(t, st.busy, s.Busy(), st.payload)
+		assert.Equal(t, st.waiting, s.Waiting(), st.payload)
+		assert.Equal(t, st.menu, s.Menu(), st.payload)
+		if st.menu {
+			assert.Equal(t, "Remove the build folder", s.Message)
+		}
+	}
+}
