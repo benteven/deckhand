@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/style"
 	"github.com/benteven/deckhand/internal/textclean"
@@ -142,7 +143,7 @@ func (m *model) layout(w, h int) (blocks [][]string, hint string, room int) {
 			blocks[len(blocks)-1] = append(blocks[len(blocks)-1], m.prPickLines(w)...)
 		}
 	}
-	hint = m.hintLine(w)
+	hint = m.usageLines(w) + m.hintLine(w)
 	room = h - 2 - strings.Count(hint, "\n")
 	if m.searching || m.query != "" {
 		room--
@@ -551,6 +552,29 @@ func (m *model) hintLine(w int) string {
 		lines = append([]string{yellow.Render(ansi.Truncate("v"+m.latest+" is out, U upgrades", w, "…"))}, lines...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *model) usageLines(w int) string {
+	now := time.Now()
+	var b strings.Builder
+	for _, name := range m.loggedIn() {
+		parts := []string{accounts.Label(name)}
+		u, ok := m.usage[name]
+		if t, limited := m.limitedUntil(name, now); limited {
+			parts = append(parts, "limit until "+resetLabel(t, now))
+		} else if !ok {
+			parts = append(parts, "no data yet")
+		} else {
+			if u.Five != nil {
+				parts = append(parts, fmt.Sprintf("5h %.0f%%", u.FiveUsed(now)))
+			}
+			if u.Week != nil {
+				parts = append(parts, fmt.Sprintf("week %.0f%%", u.WeekUsed(now)))
+			}
+		}
+		b.WriteString(m.accountStyle(name).Render(ansi.Truncate(strings.Join(parts, "  "), w, "…")) + "\n")
+	}
+	return b.String()
 }
 
 func (m *model) listHint(w int) string {

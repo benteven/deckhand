@@ -189,14 +189,14 @@ func (s *State) hook(in hookInput, now time.Time) bool {
 	return true
 }
 
-func HookSettings(exe string) []byte {
+func HookSettings(exe string, statusLine any) []byte {
 	command := "'" + strings.ReplaceAll(exe, "'", `'\''`) + "' hook"
 	entry := []map[string]any{{"hooks": []map[string]string{{"type": "command", "command": command}}}}
 	hooks := map[string]any{}
 	for _, e := range []string{"UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SubagentStart", "SubagentStop", "SessionStart", "SessionEnd"} {
 		hooks[e] = entry
 	}
-	data, _ := json.Marshal(map[string]any{"hooks": hooks})
+	data, _ := json.Marshal(map[string]any{"hooks": hooks, "statusLine": statusLine})
 	return data
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/benteven/deckhand/internal/tmux"
 	"github.com/benteven/deckhand/internal/transcript"
 	"github.com/benteven/deckhand/internal/update"
+	"github.com/benteven/deckhand/internal/usage"
 	"github.com/benteven/deckhand/internal/web"
 )
 
@@ -144,6 +145,7 @@ type refreshMsg struct {
 	geo       geometry
 	geoOK     bool
 	accounts  []accounts.Account
+	usage     map[string]usage.Usage
 	reviews   map[string]review.State
 	requests  []ctl.Request
 	err       error
@@ -289,6 +291,7 @@ type model struct {
 	loginPane     string
 	loginName     string
 	accountList   []accounts.Account
+	usage         map[string]usage.Usage
 
 	cycle    *cycle
 	handoffs map[string]*pendingHandoff
@@ -1404,6 +1407,12 @@ func (m *model) refresh() tea.Cmd {
 			msg.agents = runningAgents(ids, msg.events, msg.live, msg.files)
 		}
 		msg.accounts = accounts.List(home, claudeHome)
+		msg.usage = map[string]usage.Usage{}
+		for _, a := range msg.accounts {
+			if u, ok := usage.Load(filepath.Join(home, "usage"), accounts.Label(a.Name)); ok {
+				msg.usage[a.Name] = u
+			}
+		}
 		msg.reviews = review.LoadAll(home)
 		msg.requests = ctl.Pending(home)
 		if save {
@@ -1584,6 +1593,7 @@ func (m *model) apply(msg refreshMsg) tea.Cmd {
 	m.in.Agents = msg.agents
 	m.folders = msg.folders
 	m.accountList = msg.accounts
+	m.usage = msg.usage
 
 	cmds := m.syncReviews(msg.panes, msg.reviews)
 	cmds = append(cmds, followed, m.endDead(msg.panes, slotPane), m.endLogin(loginDead, loginGone))
