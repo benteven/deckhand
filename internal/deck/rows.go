@@ -157,7 +157,7 @@ func Build(in Inputs) (active, suspended []Row) {
 		}
 	}
 	for id, c := range in.State.Codex {
-		if !seen[id] {
+		if !seen[id] && c.Thread != "" {
 			suspended = append(suspended, Row{SessionID: id, Name: name(in.State, c.Name, live.Session{}, id, transcript.Summary{}), Cwd: c.Cwd, Kind: Suspended, LastInteraction: c.LastUsed})
 		}
 	}

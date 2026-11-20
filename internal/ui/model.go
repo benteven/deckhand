@@ -1347,7 +1347,16 @@ func (m *model) syncCwds() bool {
 
 func (m *model) syncCodex() bool {
 	changed := false
+	active := map[string]bool{}
+	for _, e := range m.state.Active {
+		active[e.SessionID] = true
+	}
 	for id, c := range m.state.Codex {
+		if c.Thread == "" && !active[id] && !m.resuming[id] && m.in.Panes[id] == "" && time.Since(c.LastUsed) > time.Minute {
+			delete(m.state.Codex, id)
+			changed = true
+			continue
+		}
 		ev, ok := m.in.Events[id]
 		if !ok {
 			continue
