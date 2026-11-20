@@ -77,6 +77,10 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 			cmds = append(cmds, m.queueRequest(req))
 			continue
 		}
+		if req.Op == "msg" {
+			cmds = append(cmds, m.msgRequest(req))
+			continue
+		}
 		if strings.HasPrefix(req.Op, "chat-") {
 			cmds = append(cmds, m.chatRequest(req))
 			continue
@@ -167,19 +171,14 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	if r.Kind != deck.Live || m.resuming[r.SessionID] {
 		return fail("%s is not running", r.Name)
 	}
-	if m.slot == r.PaneID && !m.focused {
-		return fail("the user is in %s now; try again later", r.Name)
-	}
 	if req.Op == "close" {
+		if m.userIn(r) {
+			return fail("the user is in %s now; try again later", r.Name)
+		}
 		return m.suspend(r, req.ID)
 	}
-	switch {
-	case r.Asking || m.in.Events[r.SessionID].Menu():
-		return fail("%s shows a menu; ask the user", r.Name)
-	case r.Busy || m.typing[r.PaneID]:
-		return fail("%s is working; try again when it waits", r.Name)
-	case m.handoffs[r.PaneID] != nil:
-		return fail("%s is handing off; try again later", r.Name)
+	if why := m.sendRefusal(r); why != "" {
+		return fail("%s", why)
 	}
 	if req.Op == "send" {
 		return m.typeIn(r, viaAssistant(req.Text), m.replyTyped(req.ID, r.Name, "sent"))
@@ -189,6 +188,44 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("%s", err)
 	}
 	return m.typeIn(r, prompt, m.handoffTyped(r.PaneID, m.replyTyped(req.ID, r.Name, "handed off")))
+}
+
+func (m *model) sendRefusal(r deck.Row) string {
+	switch {
+	case r.Kind != deck.Live || m.resuming[r.SessionID]:
+		return r.Name + " is not running"
+	case m.userIn(r):
+		return "the user is in " + r.Name + " now; try again later"
+	case r.Asking || m.in.Events[r.SessionID].Menu():
+		return r.Name + " shows a menu; ask the user"
+	case r.Busy || m.typing[r.PaneID]:
+		return r.Name + " is working; try again when it waits"
+	case m.handoffs[r.PaneID] != nil:
+		return r.Name + " is handing off; try again later"
+	}
+	return ""
+}
+
+func (m *model) msgRequest(req ctl.Request) tea.Cmd {
+	fail := func(format string, a ...any) tea.Cmd {
+		return m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf(format, a...)})
+	}
+	from, ok := m.rowByID(req.Caller)
+	if !ok {
+		return fail("the calling session is not in deckhand")
+	}
+	i := slices.IndexFunc(m.active, func(r deck.Row) bool { return r.Name == req.Name && r.Kind == deck.Live })
+	if i < 0 {
+		return fail("no running session named %s", req.Name)
+	}
+	r := m.active[i]
+	if r.SessionID == from.SessionID {
+		return fail("this is your own session")
+	}
+	if why := m.sendRefusal(r); why != "" {
+		return fail("%s", why)
+	}
+	return m.typeIn(r, "[from "+from.Name+"] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
 }
 
 func (m *model) setModel(id, model string) {

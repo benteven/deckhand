@@ -70,6 +70,8 @@ func ctlUsage(group string) string {
 		return "usage:\n  deckhand queue take [NAME]\n  deckhand queue give [NAME]\n  deckhand queue list\n"
 	case "chat":
 		return "usage:\n  deckhand chat reply -- TEXT\n"
+	case "msg":
+		return "usage:\n  deckhand msg NAME -- TEXT\n"
 	}
 	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--account ACCOUNT] [--model fable|opus|sonnet] -- PROMPT\n  deckhand session resume ID [--model fable|opus|sonnet]\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
@@ -112,6 +114,8 @@ func parseCtl(group string, args []string) (ctl.Request, error) {
 	}
 	verb, rest := args[0], args[1:]
 	switch group {
+	case "msg":
+		return parseMsg(verb, rest)
 	case "sub":
 		return parseSub(verb, rest)
 	case "task":
@@ -179,6 +183,14 @@ func parseSession(verb string, rest []string) (ctl.Request, error) {
 		return ctl.Request{Op: "start", Folder: folder, Name: f["name"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
 	}
 	return ctl.Request{}, errUsage
+}
+
+func parseMsg(name string, rest []string) (ctl.Request, error) {
+	head, tail, ok := splitDash(rest)
+	if name == "--" || !ok || len(head) != 0 || len(tail) == 0 {
+		return ctl.Request{}, errUsage
+	}
+	return ctl.Request{Op: "msg", Name: name, Text: strings.Join(tail, " ")}, nil
 }
 
 func parseSub(verb string, rest []string) (ctl.Request, error) {
