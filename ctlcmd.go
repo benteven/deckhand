@@ -59,7 +59,7 @@ func randomID() string {
 func ctlUsage(group string) string {
 	switch group {
 	case "sub":
-		return "usage:\n  deckhand sub start --name NAME --parent ADDR [--model fable|opus|sonnet] -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
+		return "usage:\n  deckhand sub start --name NAME --parent ADDR [--account ACCOUNT] [--model fable|opus|sonnet] -- TASK\n  deckhand sub close NAME\n  deckhand sub list\n"
 	case "task":
 		return "usage:\n  deckhand task new --title T [--prio P] [--deadline D] [--from F] [--project NAME] -- CONTEXT\n  deckhand task list\n  deckhand task start ID [--model fable|opus|sonnet]\n  deckhand task update [ID] [--title T] [--prio P] [--deadline D] [--status S] [--need TEXT] [--waits-on W] [--pr URL] [--project NAME]\n  deckhand task done [ID] [--summary TEXT]\n"
 	case "project":
@@ -198,14 +198,14 @@ func parseSub(verb string, rest []string) (ctl.Request, error) {
 		if !ok || len(tail) == 0 {
 			return ctl.Request{}, errUsage
 		}
-		f, err := parseFlags(head, "name", "parent", "model")
+		f, err := parseFlags(head, "name", "parent", "account", "model")
 		if err != nil {
 			return ctl.Request{}, err
 		}
 		if f["name"] == "" || f["parent"] == "" {
 			return ctl.Request{}, errUsage
 		}
-		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
+		return ctl.Request{Op: "sub-start", Name: f["name"], Parent: f["parent"], Account: f["account"], Text: strings.Join(tail, " "), Args: map[string]string{"model": f["model"]}}, nil
 	}
 	return ctl.Request{}, errUsage
 }

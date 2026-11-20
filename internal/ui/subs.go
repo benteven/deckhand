@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
 	"github.com/benteven/deckhand/internal/live"
@@ -47,6 +48,11 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 		if model := req.Args["model"]; model != "" && !slices.Contains(taskModels, model) {
 			return fail("model is one of %s", strings.Join(taskModels, ", "))
 		}
+		if req.Account != "" {
+			if _, err := chooseAccount(req.Account, m.loggedIn(), m.state.Limits, time.Now()); err != nil {
+				return fail("%s", err)
+			}
+		}
 		cwd := m.state.Active[i].Cwd
 		return func() tea.Msg {
 			dir, repo, branch, err := ctl.Create(cwd, req.Name)
@@ -62,7 +68,7 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 			if r, ok := m.rowByID(sub.ID); ok && r.Kind == deck.Live {
 				state = "running"
 			}
-			lines = append(lines, sub.Name+"\t"+state+"\t"+sub.Dir)
+			lines = append(lines, strings.Join([]string{sub.Name, state, sub.Dir, "claude", accounts.Label(m.state.AccountFor(sub.ID)), m.modelLabel(sub.ID)}, "\t"))
 		}
 		return m.answer(req.ID, ctl.Reply{Out: strings.Join(lines, "\n")})
 	case "sub-close":
@@ -113,6 +119,9 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 	}
 	id := uuid.NewV4().String()
 	account := m.state.AccountFor(req.Caller)
+	if a, err := chooseAccount(req.Account, m.loggedIn(), nil, time.Now()); req.Account != "" && err == nil {
+		account = a
+	}
 	m.state.Subs = append(m.state.Subs, store.Subsession{ID: id, Parent: req.Caller, Name: req.Name, Dir: msg.dir, Repo: msg.repo, Branch: msg.branch})
 	if m.state.Accounts == nil {
 		m.state.Accounts = map[string]string{}
@@ -120,8 +129,9 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 	m.state.Accounts[id] = account
 	m.setModel(id, req.Args["model"])
 	prompt := ctl.FirstPrompt(req.Parent, msg.dir, msg.branch, req.Text)
-	out := fmt.Sprintf("started %s in %s on branch %s", req.Name, msg.dir, msg.branch)
-	return tea.Batch(m.saveState(), forRequest(m.start(id, msg.dir, req.Name, account, prompt), req.ID, out))
+	start := m.start(id, msg.dir, req.Name, account, prompt)
+	out := fmt.Sprintf("started %s in %s on branch %s, account %s", req.Name, msg.dir, msg.branch, accounts.Label(m.state.AccountFor(id)))
+	return tea.Batch(m.saveState(), forRequest(start, req.ID, out))
 }
 
 func (m *model) queueCleanup(id string) tea.Cmd {
