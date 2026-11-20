@@ -231,11 +231,23 @@ func (m *model) msgRequest(req ctl.Request) tea.Cmd {
 	if !ok {
 		return fail("the calling session is not in deckhand")
 	}
-	i := slices.IndexFunc(m.active, func(r deck.Row) bool { return r.Name == req.Name && r.Kind == deck.Live })
-	if i < 0 {
-		return fail("no running session named %s", req.Name)
+	var named []deck.Row
+	for _, r := range m.active {
+		if r.SessionID == req.Name {
+			named = []deck.Row{r}
+			break
+		}
+		if r.Name == req.Name && r.Kind == deck.Live {
+			named = append(named, r)
+		}
 	}
-	r := m.active[i]
+	switch {
+	case len(named) == 0:
+		return fail("no running session %s", req.Name)
+	case len(named) > 1:
+		return fail("several sessions named %s; use the id", req.Name)
+	}
+	r := named[0]
 	if r.SessionID == from.SessionID {
 		return fail("this is your own session")
 	}

@@ -131,7 +131,7 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 		account = ""
 		m.setCodex(id, msg.dir, req.Name)
 		parent, _ := m.rowByID(req.Caller)
-		prompt = ctl.CodexFirstPrompt(m.ops.Exe, parent.Name, msg.dir, msg.branch, req.Text)
+		prompt = ctl.CodexFirstPrompt(m.ops.Exe, parent.Name, req.Caller, msg.dir, msg.branch, req.Text)
 	}
 	m.state.Subs = append(m.state.Subs, store.Subsession{ID: id, Parent: req.Caller, Name: req.Name, Dir: msg.dir, Repo: msg.repo, Branch: msg.branch})
 	if m.state.Accounts == nil {

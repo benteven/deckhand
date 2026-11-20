@@ -145,7 +145,7 @@ The assistant has the `sessions` skill, which runs `deckhand session` commands. 
 | `session send <id> -- TEXT` | Type into a session, as you |
 | `session handoff <id>`, `session close <id>` | Hand off or stop a session |
 
-Any deckhand session, Claude or Codex, can run `deckhand msg <name> -- TEXT`. Deckhand types `[from <your name>] TEXT` into the running session with that name; `assistant` is the assistant. It is refused with the reason while the target works, shows a menu, hands off, or you are in its pane.
+Any deckhand session, Claude or Codex, can run `deckhand msg <id or name> -- TEXT`. Deckhand types `[from <your name>] TEXT` into the running session with that id, or else that name; `assistant` is the assistant. A name that several running sessions share is refused; use the id. It is refused with the reason while the target works, shows a menu, hands off, or you are in its pane.
 
 `send` and `msg` type only into a normal prompt. It is refused while the session shows a permission prompt or a question menu, while you are in that pane, and while the session hands off.
 
@@ -157,7 +157,7 @@ The rules: with the assistant on, every session you start in deckhand gets a sho
 
 ### Codex sessions
 
-Deckhand can run the OpenAI Codex CLI next to Claude Code. The assistant runs `deckhand session start --agent codex --folder F --name N -- PROMPT`, and a session runs `deckhand sub start --agent codex ...` for a Codex subsession. Deckhand starts `codex` in a pane (`DECKHAND_CODEX` names another binary), with `--model` when given. Its first prompt tells it to reach other sessions with `deckhand msg`; a Codex subsession reports to its parent that way, and the parent answers it the same way.
+Deckhand can run the OpenAI Codex CLI next to Claude Code. The assistant runs `deckhand session start --agent codex --folder F --name N -- PROMPT`, and a session runs `deckhand sub start --agent codex ...` for a Codex subsession. Deckhand starts `codex` in a pane (`DECKHAND_CODEX` names another binary), with `--model` when given. Its first prompt tells it to reach other sessions with `deckhand msg`; a Codex subsession reports to its parent's id that way, and the parent answers it the same way.
 
 What works: the list, `session list` with working, waiting and the permission prompt, `session send`, `deckhand msg`, suspend, and `session resume` (it runs `codex resume` on the Codex thread deckhand saw at the first prompt). Deckhand passes its hooks with `-c` at each start and marks them trusted for that start only; `~/.codex/config.toml` is not changed. It also adds `~/.config/deckhand/requests` to the workspace-write sandbox, so `deckhand msg` works from inside Codex, and turns off the update prompt at start.
 

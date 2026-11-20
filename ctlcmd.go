@@ -71,7 +71,7 @@ func ctlUsage(group string) string {
 	case "chat":
 		return "usage:\n  deckhand chat reply -- TEXT\n"
 	case "msg":
-		return "usage:\n  deckhand msg NAME -- TEXT\n"
+		return "usage:\n  deckhand msg NAME_OR_ID -- TEXT\n"
 	}
 	return "usage:\n  deckhand session list\n  deckhand session search WORDS...\n  deckhand session start --folder DIR --name NAME [--agent claude|codex] [--account ACCOUNT] [--model MODEL] -- PROMPT\n  deckhand session resume ID [--model fable|opus|sonnet]\n  deckhand session send ID -- TEXT\n  deckhand session handoff ID\n  deckhand session close ID\n"
 }
