@@ -159,7 +159,9 @@ The rules: with the assistant on, every session you start in deckhand gets a sho
 
 Deckhand can run the OpenAI Codex CLI next to Claude Code. The assistant runs `deckhand session start --agent codex --folder F --name N -- PROMPT`, and a session runs `deckhand sub start --agent codex ...` for a Codex subsession. Deckhand starts `codex` in a pane (`DECKHAND_CODEX` names another binary), with `--model` when given. Its first prompt tells it to reach other sessions with `deckhand msg`; a Codex subsession reports to its parent's id that way, and the parent answers it the same way.
 
-What works: the list, `session list` with working, waiting and the permission prompt, `session send`, `deckhand msg`, suspend, and `session resume` (it runs `codex resume` on the Codex thread deckhand saw at the first prompt). Deckhand passes its hooks with `-c` at each start and marks them trusted for that start only; `~/.codex/config.toml` is not changed. It also adds `~/.config/deckhand/requests` to the workspace-write sandbox, so `deckhand msg` works from inside Codex, and turns off the update prompt at start.
+What works: the list, `session list` with working, waiting and the permission prompt, `session send`, `deckhand msg`, suspend, and `session resume` (it runs `codex resume` on the Codex thread deckhand saw at the first prompt). Deckhand passes its hooks with `-c` at each start and marks them trusted for that start only; `~/.codex/config.toml` is not changed. It also turns off the update prompt at start.
+
+Deckhand sets `sandbox_workspace_write.writable_roots` to `["~/.config/deckhand/requests"]` for Codex sessions, so `deckhand msg` works from inside Codex. This replaces your own `writable_roots` from `~/.codex/config.toml` in those sessions.
 
 What does not work yet: accounts (Codex uses `~/.codex`, so `--account` is refused), the usage line, handoff, review, fork, task start and transcript search.
 
