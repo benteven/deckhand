@@ -17,8 +17,8 @@ The deckhand binary is ` + exe + `.
 
 1. Run ` + "`ListAgents`" + ` and copy your own address from "This session is X [id]".
 2. Commit first if the subsession needs your uncommitted changes.
-3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" [--account <account>] [--model fable|opus|sonnet] -- "<task>"` + "`" + `. It prints the subsession's name, worktree and account. Without ` + "`--account`" + ` it uses your account. Without ` + "`--model`" + ` it runs on the Claude Code default.
-4. Talk to it with ` + "`SendMessage`" + ` to that name. It reports back to you the same way.
+3. Start: ` + "`" + exe + ` sub start --name <short-name> --parent "<your address>" [--agent claude|codex] [--account <account>] [--model fable|opus|sonnet] -- "<task>"` + "`" + `. It prints the subsession's name, worktree and account. Without ` + "`--account`" + ` it uses your account. Without ` + "`--model`" + ` it runs on the Claude Code default. ` + "`--agent codex`" + ` runs OpenAI Codex instead; it takes any ` + "`--model`" + ` and no ` + "`--account`" + `.
+4. Talk to it with ` + "`SendMessage`" + ` to that name. It reports back to you the same way. A Codex subsession has no ` + "`SendMessage`" + `: talk to it with ` + "`" + exe + " msg <name> -- TEXT`" + `, and it reports to you as text that starts with "[from <name>]".
 5. List: ` + "`" + exe + " sub list`" + `: name, state, worktree, agent, account and model, split by tabs. Close: ` + "`" + exe + " sub close <name>`" + `. Closing asks the user about the worktree; do not remove it yourself.
 6. A subsession cannot start subsessions.
 `
@@ -71,9 +71,9 @@ The deckhand binary is ` + exe + `.
 
 1. ` + "`" + exe + " session list`" + `: JSON lines with id, name, folder, state, agent, account, model, need, message.
 2. ` + "`" + exe + " session search <words>`" + `: suspended sessions that match, newest first.
-3. ` + "`" + exe + " session start --folder F --name N [--account A] [--model fable|opus|sonnet] -- PROMPT`" + `. Without ` + "`--model`" + ` it runs on the Claude Code default. Without ` + "`--account`" + ` it uses the current account, or a free one when that account is at its limit. A named account is kept; deckhand refuses the start when it is at its limit. ` + "`default`" + ` names the account in ~/.claude.
+3. ` + "`" + exe + " session start --folder F --name N [--agent claude|codex] [--account A] [--model fable|opus|sonnet] -- PROMPT`" + `. ` + "`--agent codex`" + ` runs OpenAI Codex instead; it takes any ` + "`--model`" + ` and no ` + "`--account`" + `, and handoff does not work for it. Without ` + "`--model`" + ` it runs on the Claude Code default. Without ` + "`--account`" + ` it uses the current account, or a free one when that account is at its limit. A named account is kept; deckhand refuses the start when it is at its limit. ` + "`default`" + ` names the account in ~/.claude.
 4. ` + "`" + exe + " session resume <id> [--model fable|opus|sonnet]`" + `. ` + "`--model`" + ` changes the model it resumes on and keeps it for later resumes.
-5. ` + "`" + exe + " session send <id> -- TEXT`" + `: types as the user. Refused while the session shows a menu; bring the menu to the user instead.
+5. ` + "`" + exe + " session send <id> -- TEXT`" + `: types as the user. Refused while the session shows a menu; bring the menu to the user instead. A Codex session reaches you with ` + "`" + exe + " msg assistant -- TEXT`" + `; its text starts with "[from <name>]".
 6. ` + "`" + exe + " session handoff <id>`" + ` and ` + "`" + exe + " session close <id>`" + `.
 `
 }

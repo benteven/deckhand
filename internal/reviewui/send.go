@@ -57,7 +57,7 @@ func deliver(t tmux.Client, id, text string) sentMsg {
 	if err != nil {
 		return sentMsg{err: err}
 	}
-	switch err := typing.Type(t, id, pane, text); {
+	switch err := typing.Type(t, id, pane, text, false); {
 	case errors.Is(err, typing.ErrMenu):
 		return sentMsg{waiting: true}
 	case errors.Is(err, typing.ErrPasted):

@@ -15,6 +15,7 @@ import (
 
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/ctl"
+	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/review"
 	"github.com/benteven/deckhand/internal/store"
@@ -45,12 +46,21 @@ type Launch struct {
 	ForkAccount                           string
 	Model                                 string
 	System                                string
+	Agent                                 string
+	Thread                                string
 }
 
 func (o Ops) Start(l Launch) (string, error) {
 	cwd, sessionID, account, prompt := l.Cwd, l.SessionID, l.Account, l.Prompt
 	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("folder not found: %s", cwd)
+	}
+	if l.Agent == "codex" {
+		args, err := o.codexArgs(l)
+		if err != nil {
+			return "", err
+		}
+		return o.run(cwd, sessionID, account, args)
 	}
 	args := []string{paths.ClaudeCommand()}
 	envArgs := []string{"env", ctl.SessionEnv + "=" + sessionID, usage.Env + "=" + accounts.Label(account)}
@@ -111,6 +121,43 @@ func (o Ops) Start(l Launch) (string, error) {
 	if prompt != "" {
 		args = append(args, prompt)
 	}
+	return o.run(cwd, sessionID, account, args)
+}
+
+func (o Ops) codexArgs(l Launch) ([]string, error) {
+	if l.Account != "" {
+		return nil, fmt.Errorf("codex sessions use the default ~/.codex; leave out the account")
+	}
+	if l.ForkOf != "" {
+		return nil, fmt.Errorf("codex sessions cannot fork")
+	}
+	requests := filepath.Join(o.Home, "requests")
+	if err := os.MkdirAll(requests, 0o700); err != nil {
+		return nil, err
+	}
+	if err := events.Record(filepath.Join(o.Home, "events"), l.SessionID, "SessionStart", time.Now()); err != nil {
+		return nil, err
+	}
+	args := []string{"env", ctl.SessionEnv + "=" + l.SessionID, paths.CodexCommand()}
+	if l.Resume {
+		if l.Thread == "" {
+			return nil, fmt.Errorf("deckhand never learned the codex thread of this session, so it cannot resume it")
+		}
+		args = append(args, "resume", l.Thread)
+	}
+	if l.Model != "" && l.Model != "inherit" {
+		args = append(args, "--model", l.Model)
+	}
+	roots, _ := json.Marshal([]string{requests})
+	args = append(args, "-c", "sandbox_workspace_write.writable_roots="+string(roots), "-c", "check_for_update_on_startup=false")
+	args = append(args, events.CodexArgs(o.Exe)...)
+	if l.Prompt != "" {
+		args = append(args, l.Prompt)
+	}
+	return args, nil
+}
+
+func (o Ops) run(cwd, sessionID, account string, args []string) (string, error) {
 	for i, a := range args {
 		args[i] = tmux.ShellQuote(a)
 	}

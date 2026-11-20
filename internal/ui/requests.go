@@ -14,6 +14,7 @@ import (
 	"github.com/benteven/deckhand/internal/accounts"
 	"github.com/benteven/deckhand/internal/ctl"
 	"github.com/benteven/deckhand/internal/deck"
+	"github.com/benteven/deckhand/internal/store"
 	"github.com/benteven/deckhand/internal/typing"
 )
 
@@ -77,6 +78,10 @@ func (m *model) handleRequests(pending []ctl.Request) tea.Cmd {
 			cmds = append(cmds, m.queueRequest(req))
 			continue
 		}
+		if req.Op == "msg" {
+			cmds = append(cmds, m.msgRequest(req))
+			continue
+		}
 		if strings.HasPrefix(req.Op, "chat-") {
 			cmds = append(cmds, m.chatRequest(req))
 			continue
@@ -111,9 +116,7 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("only the assistant can do this")
 	}
 	model := req.Args["model"]
-	if model != "" && !slices.Contains(taskModels, model) {
-		return fail("model is one of %s", strings.Join(taskModels, ", "))
-	}
+	badModel := model != "" && !slices.Contains(taskModels, model)
 	switch req.Op {
 	case "list":
 		return m.answer(req.ID, ctl.Reply{Out: m.listOut()})
@@ -125,8 +128,17 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 				return fail("a session named %s is running", req.Name)
 			}
 		}
+		codex := req.Args["agent"] == "codex"
+		switch {
+		case badModel && !codex:
+			return fail("model is one of %s", strings.Join(taskModels, ", "))
+		case codex && req.Account != "":
+			return fail("codex sessions use the default ~/.codex; leave out --account")
+		}
 		account := m.state.Account
-		if req.Account != "" {
+		if codex {
+			account = ""
+		} else if req.Account != "" {
 			a, err := chooseAccount(req.Account, m.loggedIn(), m.state.Limits, time.Now())
 			if err != nil {
 				return fail("%s", err)
@@ -138,6 +150,10 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 			text = viaAssistant(text)
 		}
 		id := uuid.NewV4().String()
+		if codex {
+			m.setCodex(id, req.Folder, req.Name)
+			text = strings.TrimSpace(ctl.CodexIntro(m.ops.Exe) + "\n\n" + text)
+		}
 		m.setModel(id, model)
 		start := m.start(id, req.Folder, req.Name, account, text)
 		return tea.Batch(m.saveState(), forRequest(start, req.ID, id+" on account "+accounts.Label(m.state.AccountFor(id))))
@@ -151,6 +167,8 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	}
 	if req.Op == "resume" {
 		switch {
+		case badModel && m.state.Agent(r.SessionID) != "codex":
+			return fail("model is one of %s", strings.Join(taskModels, ", "))
 		case r.Kind == deck.Elsewhere:
 			return fail("%s runs in another terminal", r.Name)
 		case r.Kind == deck.Live || m.resuming[r.SessionID]:
@@ -164,22 +182,20 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 	if (req.Op == "handoff" || req.Op == "close") && r.SessionID == m.state.Assistant.ID {
 		return fail("the assistant cannot do this to itself")
 	}
+	if req.Op == "handoff" && m.state.Agent(r.SessionID) == "codex" {
+		return fail("handoff does not work for codex sessions")
+	}
 	if r.Kind != deck.Live || m.resuming[r.SessionID] {
 		return fail("%s is not running", r.Name)
 	}
-	if m.slot == r.PaneID && !m.focused {
-		return fail("the user is in %s now; try again later", r.Name)
-	}
 	if req.Op == "close" {
+		if m.userIn(r) {
+			return fail("the user is in %s now; try again later", r.Name)
+		}
 		return m.suspend(r, req.ID)
 	}
-	switch {
-	case r.Asking || m.in.Events[r.SessionID].Menu():
-		return fail("%s shows a menu; ask the user", r.Name)
-	case r.Busy || m.typing[r.PaneID]:
-		return fail("%s is working; try again when it waits", r.Name)
-	case m.handoffs[r.PaneID] != nil:
-		return fail("%s is handing off; try again later", r.Name)
+	if why := m.sendRefusal(r); why != "" {
+		return fail("%s", why)
 	}
 	if req.Op == "send" {
 		return m.typeIn(r, viaAssistant(req.Text), m.replyTyped(req.ID, r.Name, "sent"))
@@ -189,6 +205,63 @@ func (m *model) handleRequest(req ctl.Request) tea.Cmd {
 		return fail("%s", err)
 	}
 	return m.typeIn(r, prompt, m.handoffTyped(r.PaneID, m.replyTyped(req.ID, r.Name, "handed off")))
+}
+
+func (m *model) sendRefusal(r deck.Row) string {
+	switch {
+	case r.Kind != deck.Live || m.resuming[r.SessionID]:
+		return r.Name + " is not running"
+	case m.userIn(r):
+		return "the user is in " + r.Name + " now; try again later"
+	case r.Asking || m.in.Events[r.SessionID].Menu():
+		return r.Name + " shows a menu; ask the user"
+	case r.Busy || m.typing[r.PaneID]:
+		return r.Name + " is working; try again when it waits"
+	case m.handoffs[r.PaneID] != nil:
+		return r.Name + " is handing off; try again later"
+	}
+	return ""
+}
+
+func (m *model) msgRequest(req ctl.Request) tea.Cmd {
+	fail := func(format string, a ...any) tea.Cmd {
+		return m.answer(req.ID, ctl.Reply{Err: fmt.Sprintf(format, a...)})
+	}
+	from, ok := m.rowByID(req.Caller)
+	if !ok {
+		return fail("the calling session is not in deckhand")
+	}
+	var named []deck.Row
+	for _, r := range m.active {
+		if r.SessionID == req.Name {
+			named = []deck.Row{r}
+			break
+		}
+		if r.Name == req.Name && r.Kind == deck.Live {
+			named = append(named, r)
+		}
+	}
+	switch {
+	case len(named) == 0:
+		return fail("no running session %s", req.Name)
+	case len(named) > 1:
+		return fail("several sessions named %s; use the id", req.Name)
+	}
+	r := named[0]
+	if r.SessionID == from.SessionID {
+		return fail("this is your own session")
+	}
+	if why := m.sendRefusal(r); why != "" {
+		return fail("%s", why)
+	}
+	return m.typeIn(r, "[from "+from.Name+"] "+req.Text, m.replyTyped(req.ID, r.Name, "sent"))
+}
+
+func (m *model) setCodex(id, cwd, name string) {
+	if m.state.Codex == nil {
+		m.state.Codex = map[string]store.Codex{}
+	}
+	m.state.Codex[id] = store.Codex{Cwd: cwd, Name: name, LastUsed: time.Now()}
 }
 
 func (m *model) setModel(id, model string) {
@@ -249,7 +322,7 @@ func (m *model) listOut() string {
 
 func (m *model) listLineOf(r deck.Row) listLine {
 	ev := m.in.Events[r.SessionID]
-	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Agent: "claude", Account: accounts.Label(m.state.AccountFor(r.SessionID)), Model: m.modelLabel(r.SessionID), Need: ev.Need, Message: ev.Message}
+	return listLine{ID: r.SessionID, Name: r.Name, Folder: r.Cwd, State: rowState(r), Agent: m.state.Agent(r.SessionID), Account: accounts.Label(m.state.AccountFor(r.SessionID)), Model: m.modelLabel(r.SessionID), Need: ev.Need, Message: ev.Message}
 }
 
 func (m *model) modelLabel(id string) string {

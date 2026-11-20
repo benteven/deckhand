@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/benteven/deckhand/internal/tmux"
 	"time"
 )
 
@@ -179,6 +181,14 @@ func Head(repo, branch string) (string, error) {
 func DeleteBranch(repo, branch string) error {
 	_, err := git(repo, "branch", "-D", branch)
 	return err
+}
+
+func CodexIntro(exe string) string {
+	return fmt.Sprintf("You run in deckhand. To reach another deckhand session, run `%s msg NAME_OR_ID -- TEXT`; the assistant is NAME assistant.", tmux.ShellQuote(exe))
+}
+
+func CodexFirstPrompt(exe, parentName, parentID, dir, branch, task string) string {
+	return fmt.Sprintf("%s\nYou are a subsession of %s, started by deckhand. You work in your own git worktree at %s, on branch %s. Report to %s with `%s msg %s -- TEXT` when you finish or need a decision.\n\nTask:\n%s", CodexIntro(exe), parentName, dir, branch, parentName, tmux.ShellQuote(exe), parentID, task)
 }
 
 func FirstPrompt(parent, dir, branch, task string) string {

@@ -45,8 +45,12 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 		if m.nameRunning(req.Name) {
 			return fail("a session named %s is running", req.Name)
 		}
-		if model := req.Args["model"]; model != "" && !slices.Contains(taskModels, model) {
+		codex := req.Args["agent"] == "codex"
+		if model := req.Args["model"]; !codex && model != "" && !slices.Contains(taskModels, model) {
 			return fail("model is one of %s", strings.Join(taskModels, ", "))
+		}
+		if codex && req.Account != "" {
+			return fail("codex sessions use the default ~/.codex; leave out --account")
 		}
 		if req.Account != "" {
 			if _, err := chooseAccount(req.Account, m.loggedIn(), m.state.Limits, time.Now()); err != nil {
@@ -68,7 +72,7 @@ func (m *model) subRequest(req ctl.Request) tea.Cmd {
 			if r, ok := m.rowByID(sub.ID); ok && r.Kind == deck.Live {
 				state = "running"
 			}
-			lines = append(lines, strings.Join([]string{sub.Name, state, sub.Dir, "claude", accounts.Label(m.state.AccountFor(sub.ID)), m.modelLabel(sub.ID)}, "\t"))
+			lines = append(lines, strings.Join([]string{sub.Name, state, sub.Dir, m.state.Agent(sub.ID), accounts.Label(m.state.AccountFor(sub.ID)), m.modelLabel(sub.ID)}, "\t"))
 		}
 		return m.answer(req.ID, ctl.Reply{Out: strings.Join(lines, "\n")})
 	case "sub-close":
@@ -122,13 +126,19 @@ func (m *model) subCreated(msg subCreatedMsg) tea.Cmd {
 	if a, err := chooseAccount(req.Account, m.loggedIn(), nil, time.Now()); req.Account != "" && err == nil {
 		account = a
 	}
+	prompt := ctl.FirstPrompt(req.Parent, msg.dir, msg.branch, req.Text)
+	if req.Args["agent"] == "codex" {
+		account = ""
+		m.setCodex(id, msg.dir, req.Name)
+		parent, _ := m.rowByID(req.Caller)
+		prompt = ctl.CodexFirstPrompt(m.ops.Exe, parent.Name, req.Caller, msg.dir, msg.branch, req.Text)
+	}
 	m.state.Subs = append(m.state.Subs, store.Subsession{ID: id, Parent: req.Caller, Name: req.Name, Dir: msg.dir, Repo: msg.repo, Branch: msg.branch})
 	if m.state.Accounts == nil {
 		m.state.Accounts = map[string]string{}
 	}
 	m.state.Accounts[id] = account
 	m.setModel(id, req.Args["model"])
-	prompt := ctl.FirstPrompt(req.Parent, msg.dir, msg.branch, req.Text)
 	start := m.start(id, msg.dir, req.Name, account, prompt)
 	out := fmt.Sprintf("started %s in %s on branch %s, account %s", req.Name, msg.dir, msg.branch, accounts.Label(m.state.AccountFor(id)))
 	return tea.Batch(m.saveState(), forRequest(start, req.ID, out))

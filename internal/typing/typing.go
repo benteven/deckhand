@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/benteven/deckhand/internal/events"
 	"github.com/benteven/deckhand/internal/live"
 	"github.com/benteven/deckhand/internal/paths"
 	"github.com/benteven/deckhand/internal/tmux"
@@ -62,8 +64,15 @@ func Asking(t tmux.Client, id, pane string) bool {
 	return err == nil && menuLine.MatchString(screen)
 }
 
-func Type(t tmux.Client, id, pane, text string) error {
-	if Asking(t, id, pane) {
+func Type(t tmux.Client, id, pane, text string, codex bool) error {
+	asking := func() bool { return Asking(t, id, pane) }
+	if codex {
+		asking = func() bool {
+			ev, _ := events.Read(filepath.Join(paths.DeckHome(), "events"), id)
+			return ev.Menu()
+		}
+	}
+	if asking() {
 		return ErrMenu
 	}
 	buffer := fmt.Sprintf("deck-type-%d-%d", os.Getpid(), seq.Add(1))
@@ -74,7 +83,7 @@ func Type(t tmux.Client, id, pane, text string) error {
 		return err
 	}
 	time.Sleep(150 * time.Millisecond)
-	if Asking(t, id, pane) {
+	if asking() {
 		return ErrPasted
 	}
 	_, err := t.Run("send-keys", "-t", pane, "Enter")

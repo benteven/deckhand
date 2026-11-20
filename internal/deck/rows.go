@@ -103,6 +103,9 @@ func Build(in Inputs) (active, suspended []Row) {
 			Job:             job,
 			JobSession:      jobSession,
 		}
+		if _, ok := in.State.Codex[e.SessionID]; ok {
+			r.Busy, r.Asking = ev.Busy(), ev.Menu()
+		}
 		if r.PaneID != "" {
 			r.Kind = Live
 		}
@@ -151,6 +154,11 @@ func Build(in Inputs) (active, suspended []Row) {
 	for _, f := range in.Files {
 		if !seen[f.SessionID] {
 			suspended = append(suspended, fileRow(in, f))
+		}
+	}
+	for id, c := range in.State.Codex {
+		if !seen[id] && c.Thread != "" {
+			suspended = append(suspended, Row{SessionID: id, Name: name(in.State, c.Name, live.Session{}, id, transcript.Summary{}), Cwd: c.Cwd, Kind: Suspended, LastInteraction: c.LastUsed})
 		}
 	}
 	sort.SliceStable(suspended, func(i, j int) bool {
